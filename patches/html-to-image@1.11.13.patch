@@ -1,0 +1,40 @@
+diff --git a/es/clone-node.js b/es/clone-node.js
+index 114cbf214f65cda237dbba67458c2b68fadf421e..7c76467da564080f96b79b06e0ec973c9f56e462 100644
+--- a/es/clone-node.js
++++ b/es/clone-node.js
+@@ -125,9 +125,35 @@ function cloneSelectValue(nativeNode, clonedNode) {
+         }
+     }
+ }
++// devbar: markup has no scroll position, so a scrolled pane would be drawn at its top. Shift the
++// clone's children by the pane's scroll offset instead (the document's own scroll is handled by
++// the caller, so fixed-position elements stay where they are).
++function cloneScrollPosition(nativeNode, clonedNode) {
++    if (!isInstanceOfElement(nativeNode, Element) ||
++        nativeNode === document.documentElement ||
++        nativeNode === document.body) {
++        return;
++    }
++    const x = nativeNode.scrollLeft;
++    const y = nativeNode.scrollTop;
++    if (!x && !y) {
++        return;
++    }
++    toArray(clonedNode.children).forEach((child) => {
++        if (!child.style) {
++            return;
++        }
++        const prev = child.style.translate;
++        const parts = prev && prev !== 'none' ? prev.split(' ') : [];
++        const px = parts[0] || '0px';
++        const py = parts[1] || '0px';
++        child.style.translate = `calc(${px} - ${x}px) calc(${py} - ${y}px)`;
++    });
++}
+ function decorate(nativeNode, clonedNode, options) {
+     if (isInstanceOfElement(clonedNode, Element)) {
+         cloneCSSStyle(nativeNode, clonedNode, options);
++        cloneScrollPosition(nativeNode, clonedNode);
+         clonePseudoElements(nativeNode, clonedNode, options);
+         cloneInputValue(nativeNode, clonedNode);
+         cloneSelectValue(nativeNode, clonedNode);
