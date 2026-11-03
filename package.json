@@ -28,6 +28,9 @@
     "./devbar.js": "./dist/devbar.js",
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",
