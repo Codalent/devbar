@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "devbar": "./dist/cli.js"
+    "devbar": "dist/cli.js"
   },
   "exports": {
     ".": {
