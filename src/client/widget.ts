@@ -4,6 +4,7 @@ import {
   ELEMENT_NAME,
   GLOBAL_NAME,
   NAME,
+  PACKAGE,
   STATUSES,
   STATUS_LABELS,
   STORAGE_PREFIX,
@@ -61,7 +62,7 @@ const SIZE = 36;
 const M = 16;
 const CORNER = 110;
 const TYPE_COLOR: Record<ItemType, string> = { bug: "var(--bug)", task: "var(--task)", idea: "var(--idea)" };
-const OFFLINE = "Not connected. Run npx devbar in the project folder.";
+const OFFLINE = `Not connected. Run npx ${PACKAGE} in the project folder.`;
 
 const ICON_PLUS = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 const ICON_PEN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
@@ -70,7 +71,7 @@ const ICON_BOARD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const TEMPLATE = `
 <div class="root">
   <button class="dot" aria-label="${NAME}" aria-expanded="false">${ICON_PLUS}<span class="badge" hidden>0</span></button>
-  <div class="tip" role="tooltip">Not connected. Run <code>npx ${NAME}</code> in the project folder.</div>
+  <div class="tip" role="tooltip">Not connected. Run <code>npx ${PACKAGE}</code> in the project folder.</div>
   <div class="pills h rev">
     <button class="pill glass" data-act="new">${ICON_PEN}New task<kbd>N</kbd></button>
     <button class="pill glass" data-act="board">${ICON_BOARD}Board<kbd>B</kbd></button>
@@ -356,7 +357,7 @@ export class Toolbar {
     if (!this.noticed) {
       this.noticed = true;
       // The one console line: quiet, and never repeated while the page is open.
-      console.info(`[${NAME}] Not connected to ${this.server}. Run \`npx ${NAME}\` in the project folder; the toolbar reconnects on its own.`);
+      console.info(`[${NAME}] Not connected to ${this.server}. Run \`npx ${PACKAGE}\` in the project folder; the toolbar reconnects on its own.`);
     }
     // Back off: 2, 4, 8, 16 and 32 s, then stop polling. The browser itself logs every refused
     // request, which no script can silence, so after that the toolbar only retries when the tab

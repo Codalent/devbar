@@ -1,5 +1,5 @@
 {
-  "name": "devbar",
+  "name": "@codalent/devbar",
   "version": "0.2.0",
   "description": "A dev toolbar that logs tasks, bugs and ideas from your running web app into Markdown files in your repository.",
   "license": "MIT",

@@ -31,7 +31,7 @@ function refuse(res: ServerResponse, code: string, message: string) {
   res.end(JSON.stringify({ error: { code, message } }));
 }
 
-/** The standalone server `npx devbar` starts: the handler on loopback, for pages on localhost. */
+/** The standalone server `npx @codalent/devbar` starts: the handler on loopback, for pages on localhost. */
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const host = options.host ?? "127.0.0.1";
   if (!["127.0.0.1", "::1", "localhost"].includes(host)) {

@@ -1,9 +1,11 @@
 /**
- * The product's name lives here and in package.json `name`, nowhere else. Renaming the package is
- * changing these two places: the data folder, the CLI banner, the custom element, the
- * localStorage keys and the one global all derive from it.
+ * The product's name lives here, nowhere else: the data folder, the CLI command and banner, the
+ * custom element, the localStorage keys and the one global all derive from it.
  */
 export const NAME = "devbar";
+
+/** The npm package, as package.json `name` says: what people install and `npx`. */
+export const PACKAGE = "@codalent/devbar";
 
 /** The data folder in the project root. */
 export const DIR_NAME = `.${NAME}`;

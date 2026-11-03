@@ -12,9 +12,9 @@ in development.
 ## Install
 
 ```sh
-npm install --save-dev devbar
-npx devbar init        # makes .devbar/ with five status folders and config.json
-npx devbar             # starts the local server on http://127.0.0.1:4711
+npm install --save-dev @codalent/devbar
+npx @codalent/devbar init   # makes .devbar/ with five status folders and config.json
+npx @codalent/devbar        # starts the local server on http://127.0.0.1:4711
 ```
 
 Then add **one line** to your app, in development only:
@@ -26,7 +26,7 @@ Then add **one line** to your app, in development only:
 React or Next.js, in the root layout:
 
 ```tsx
-import { DevBar } from "devbar/react";
+import { DevBar } from "@codalent/devbar/react";
 // …
 <DevBar />
 ```
@@ -48,18 +48,18 @@ Other ways in:
 - `<script src="…/devbar.js" data-server="http://127.0.0.1:4800">` — talk to a server other than the
   one the script came from (by default, the script's address without `/devbar.js`).
 - `<script src="…/devbar.js" data-enabled="false">` — render nothing and make no request.
-- `import { mount } from "devbar/client"; mount({ server, enabled })` — the widget as a module, for a
+- `import { mount } from "@codalent/devbar/client"; mount({ server, enabled })` — the widget as a module, for a
   bundler. `enabled` defaults to `process.env.NODE_ENV === "development"`.
 - `<DevBar server="http://127.0.0.1:4800" enabled />` — the React props.
 
 ### Inside your own server
 
-Instead of running `npx devbar`, mount devbar in the Node server your app already has, and import
+Instead of running `npx @codalent/devbar`, mount devbar in the Node server your app already has, and import
 the widget in your frontend. Nothing else runs; the folder is the same.
 
 ```js
 // backend (Express, Connect, or any Node http server)
-import { createDevbar } from "devbar/server";
+import { createDevbar } from "@codalent/devbar/server";
 
 if (process.env.DEVBAR === "on") {
   const devbar = await createDevbar({
@@ -72,7 +72,7 @@ if (process.env.DEVBAR === "on") {
 
 ```js
 // frontend, in the browser (a client component in React or Next)
-const { mount } = await import("devbar/client");
+const { mount } = await import("@codalent/devbar/client");
 mount({ server: "https://api.example.dev/devbar", enabled: true, key: savedKey });
 ```
 
@@ -184,7 +184,7 @@ name. The server never rewrites a file except when you edit or move it.
 Because every item is a Markdown file in the repository, an agent such as Claude Code can work from the
 folders: read `.devbar/ready/`, move a file to `in-progress/` when it starts and to `closed/` when the
 work is done and verified. **Ready means approved to build**; a person moves items into it.
-`npx devbar init` offers to append a paragraph saying exactly this to your `AGENTS.md` (or `CLAUDE.md`);
+`npx @codalent/devbar init` offers to append a paragraph saying exactly this to your `AGENTS.md` (or `CLAUDE.md`);
 `--yes` appends without asking.
 
 ## Configuration

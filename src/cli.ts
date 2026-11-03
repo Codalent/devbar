@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { DEFAULT_PORT, DIR_NAME, NAME, STATUSES } from "./name.js";
+import { DEFAULT_PORT, DIR_NAME, NAME, PACKAGE, STATUSES } from "./name.js";
 import { defaultConfig } from "./server/config.js";
 import { readVersion, startServer } from "./server/index.js";
 
@@ -24,7 +24,7 @@ Options
 
 Then add one line to your app, in development only:
   <script src="http://127.0.0.1:${DEFAULT_PORT}/${NAME}.js"></script>
-or, in React / Next:  import { DevBar } from "${NAME}/react"  and render <DevBar /> once.
+or, in React / Next:  import { DevBar } from "${PACKAGE}/react"  and render <DevBar /> once.
 `;
 
 const MARKER = `<!-- ${NAME}: task folders -->`;
@@ -143,7 +143,7 @@ async function init(args: Args): Promise<void> {
   let go = args.yes;
   if (!go) {
     if (process.stdin.isTTY) go = await ask(`${verb} so AI coding agents know Ready means "approved to build"? [Y/n] `);
-    else console.log(`Skipped ${name}: run \`${NAME} init --yes\` to add the agent paragraph.`);
+    else console.log(`Skipped ${name}: run \`npx ${PACKAGE} init --yes\` to add the agent paragraph.`);
   }
   if (go) {
     const before = existsSync(target) ? await readFile(target, "utf8") : "";
@@ -155,7 +155,7 @@ async function init(args: Args): Promise<void> {
 }
 
 function printNext(): void {
-  console.log(`\nNext: run \`npx ${NAME}\` and add to your app, in development only:\n  <script src="http://127.0.0.1:${DEFAULT_PORT}/${NAME}.js"></script>`);
+  console.log(`\nNext: run \`npx ${PACKAGE}\` and add to your app, in development only:\n  <script src="http://127.0.0.1:${DEFAULT_PORT}/${NAME}.js"></script>`);
 }
 
 function openInBrowser(url: string): void {
@@ -171,7 +171,7 @@ function openInBrowser(url: string): void {
 async function start(args: Args): Promise<void> {
   const dataDir = path.resolve(args.dir);
   const shown = path.relative(process.cwd(), dataDir) || DIR_NAME;
-  if (!existsSync(dataDir)) fail(`no ${shown}/ folder here. Run \`npx ${NAME} init\` in the project root first, or pass --dir.`);
+  if (!existsSync(dataDir)) fail(`no ${shown}/ folder here. Run \`npx ${PACKAGE} init\` in the project root first, or pass --dir.`);
   const version = await readVersion();
   let server;
   try {
