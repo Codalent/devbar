@@ -9,6 +9,11 @@ it up. The same dot opens a **kanban board** of those files.
 Nothing leaves your machine: a tiny local server reads and writes the files, and the widget only runs
 in development.
 
+![devbar in action: log a bug with a screenshot, the console error and the picked element, then drag it across the board](docs/demo.gif)
+
+<sub>Logging a bug on the demo page, picking the broken button, saving it as `.devbar/open/009-….md`, then
+moving it to Ready on the board. [Watch as MP4](docs/demo.mp4).</sub>
+
 ## Install
 
 ```sh
