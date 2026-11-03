@@ -11,6 +11,8 @@ export interface MountOptions {
    * (process.env.NODE_ENV === "development" as your bundler sets it); otherwise nothing renders.
    */
   enabled?: boolean;
+  /** The server's shared key, when it was started with one (`createDevbar({ key })`). */
+  key?: string;
 }
 
 /** True only when a bundler says this is a development build. */
@@ -39,7 +41,7 @@ export function mount(options: MountOptions = {}): void {
   const server = options.server ?? "http://127.0.0.1:4711";
   const start = () => {
     if (current) return;
-    current = new Toolbar(server);
+    current = new Toolbar(server, options.key);
     w[GLOBAL_NAME] = current.handle();
     loadFonts(NAME);
     current.mount();

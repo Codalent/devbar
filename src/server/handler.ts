@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -18,6 +19,13 @@ export interface DevbarOptions {
    * by default when you mount the handler in your own app.
    */
   pages?: boolean;
+  /**
+   * A shared secret. When set, every request must carry it, in an `X-Devbar-Key` header or a `key`
+   * query parameter (for the event stream and images, which cannot send headers); one without it
+   * is treated as a path devbar does not know (`next()`, or 404), so devbar looks switched off.
+   * Give the same key to the widget: `mount({ server, key })`.
+   */
+  key?: string;
 }
 
 /** A Node request handler; `next` (Express, Connect) is called for paths devbar does not know. */
@@ -48,6 +56,8 @@ export async function readVersion(): Promise<string> {
   }
   return "0.0.0";
 }
+
+const digest = (value: string) => createHash("sha256").update(value).digest();
 
 /** The widget bundle sits next to this file in dist/. */
 async function widgetBundlePath(): Promise<string> {
@@ -80,6 +90,15 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
   const store = createStore(dataDir, () => config, displayDir);
   await store.ensureFolders();
   const version = await readVersion();
+  if (options.key !== undefined && !options.key) throw new Error("devbar: `key` must not be empty.");
+  const expectedKey = options.key ? digest(options.key) : null;
+  /** Compares hashes, so the time taken says nothing about the key. */
+  const keyMatches = (req: IncomingMessage, url: URL) => {
+    if (!expectedKey) return true;
+    const header = req.headers["x-devbar-key"];
+    const given = (Array.isArray(header) ? header[0] : header) ?? url.searchParams.get("key");
+    return !!given && timingSafeEqual(digest(given), expectedKey);
+  };
 
   // ---- live updates: one SSE stream per open board, fed by a watcher on the data folder ----
   const clients = new Set<ServerResponse>();
@@ -163,6 +182,10 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
   async function route(req: IncomingMessage, res: ServerResponse, next?: (error?: unknown) => void): Promise<void> {
     const method = req.method ?? "GET";
     const url = new URL(req.url ?? "/", "http://devbar.invalid");
+    if (!keyMatches(req, url)) {
+      if (next) return next();
+      return send(res, 404, { error: { code: "NOT_FOUND", message: `No route for ${method} ${url.pathname}.` } });
+    }
     const parts = url.pathname.split("/").filter(Boolean).map((p) => {
       try {
         return decodeURIComponent(p);

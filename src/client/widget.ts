@@ -197,6 +197,8 @@ export class Toolbar {
   readonly host: HTMLElement;
   private readonly root: ShadowRoot;
   private readonly server: string;
+  /** Sent with every request: a header where it can be, a `key` parameter where it cannot. */
+  private readonly key: string | null;
 
   private connected = false;
   private noticed = false;
@@ -234,8 +236,9 @@ export class Toolbar {
   private observer: MutationObserver | null = null;
   private readonly cleanups: Array<() => void> = [];
 
-  constructor(server: string) {
+  constructor(server: string, key?: string) {
     this.server = server.replace(/\/+$/, "");
+    this.key = key || null;
     if (!customElements.get(ELEMENT_NAME)) customElements.define(ELEMENT_NAME, class extends HTMLElement {});
     this.host = document.createElement(ELEMENT_NAME);
     this.host.setAttribute("style", HOST_STYLE);
@@ -281,6 +284,15 @@ export class Toolbar {
     this.cleanups.push(() => target.removeEventListener(type, fn as EventListener, capture));
   }
 
+  private keyHeader(): Record<string, string> {
+    return this.key ? { "X-Devbar-Key": this.key } : {};
+  }
+
+  /** For the event stream and images, which cannot send a header. */
+  private withKey(url: string): string {
+    return this.key ? `${url}?key=${encodeURIComponent(this.key)}` : url;
+  }
+
   private async api<T = Record<string, unknown>>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
     const { json, ...rest } = init;
     let res: Response;
@@ -288,7 +300,7 @@ export class Toolbar {
       res = await fetch(this.server + path, {
         ...rest,
         cache: "no-store",
-        headers: json !== undefined ? { "Content-Type": "application/json" } : undefined,
+        headers: { ...this.keyHeader(), ...(json !== undefined ? { "Content-Type": "application/json" } : {}) },
         body: json !== undefined ? JSON.stringify(json) : undefined,
       });
     } catch {
@@ -321,7 +333,7 @@ export class Toolbar {
     this.lastAttempt = Date.now();
     clearTimeout(this.retryTimer);
     try {
-      const res = await fetch(`${this.server}/api/health`, { cache: "no-store" });
+      const res = await fetch(`${this.server}/api/health`, { cache: "no-store", headers: this.keyHeader() });
       if (!res.ok) throw new Error(String(res.status));
       const health = (await res.json()) as { config?: WidgetConfig };
       if (health.config) this.applyConfig(health.config);
@@ -364,7 +376,7 @@ export class Toolbar {
 
   private openEvents() {
     this.events?.close();
-    const es = new EventSource(`${this.server}/api/events`);
+    const es = new EventSource(this.withKey(`${this.server}/api/events`));
     this.events = es;
     es.addEventListener("change", () => {
       clearTimeout(this.refreshTimer);
@@ -1162,7 +1174,7 @@ export class Toolbar {
   private assetUrl(src: string): string | null {
     const assets = this.config?.assets ?? "assets";
     const m = src.match(new RegExp(`^(?:\\.{1,2}/)*${assets.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/([A-Za-z0-9][A-Za-z0-9._-]*)$`));
-    if (m) return `${this.server}/assets/${encodeURIComponent(m[1])}`;
+    if (m) return this.withKey(`${this.server}/assets/${encodeURIComponent(m[1])}`);
     if (/^https?:\/\//i.test(src)) return src;
     return null;
   }

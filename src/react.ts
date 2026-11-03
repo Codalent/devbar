@@ -9,6 +9,8 @@ export interface DevBarProps {
    * so a production build renders nothing and loads nothing.
    */
   enabled?: boolean;
+  /** The server's shared key, when it was started with one. */
+  key?: string;
 }
 
 const DEFAULT_SERVER = "http://127.0.0.1:4711";
@@ -34,7 +36,8 @@ const reactMajor = Number.parseInt(version, 10) || 0;
  */
 export function DevBar(props: DevBarProps): ReturnType<typeof createElement> | null {
   const on = shouldLoad(props);
-  const src = `${(props.server ?? DEFAULT_SERVER).replace(/\/+$/, "")}/devbar.js`;
+  const base = `${(props.server ?? DEFAULT_SERVER).replace(/\/+$/, "")}/devbar.js`;
+  const src = props.key ? `${base}?key=${encodeURIComponent(props.key)}` : base;
   useEffect(() => {
     if (!on || reactMajor >= 19) return;
     const w = window as unknown as Record<string, unknown>;

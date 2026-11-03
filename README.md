@@ -62,7 +62,10 @@ the widget in your frontend. Nothing else runs; the folder is the same.
 import { createDevbar } from "devbar/server";
 
 if (process.env.DEVBAR === "on") {
-  const devbar = await createDevbar({ dir: new URL("../.devbar", import.meta.url).pathname });
+  const devbar = await createDevbar({
+    dir: new URL("../.devbar", import.meta.url).pathname,
+    key: process.env.DEVBAR_KEY, // optional: only requests that carry it get in
+  });
   app.use("/devbar", devbar.handle); // before a JSON body parser, or exempt /devbar from it
 }
 ```
@@ -70,14 +73,18 @@ if (process.env.DEVBAR === "on") {
 ```js
 // frontend, in the browser (a client component in React or Next)
 const { mount } = await import("devbar/client");
-mount({ server: "https://api.example.dev/devbar", enabled: true });
+mount({ server: "https://api.example.dev/devbar", enabled: true, key: savedKey });
 ```
 
 `handle(req, res, next)` answers the paths below relative to where it is mounted, and calls `next`
 for any other. It reads the request body itself (an item with a screenshot is a few megabytes) and
 uses a body a parser already read. It applies no CORS and no access rules: your server's own apply,
-so a page on another origin needs that origin allowed, and anything that can reach the path can
-read and write the folder. Screenshots and the script are sent with
+so a page on another origin needs that origin allowed (and the `X-Devbar-Key` header, with a key).
+Without a key, anything that can reach the path can read and write the folder. With `key`, every
+request must carry it, as an `X-Devbar-Key` header or a `key` query parameter (the event stream and
+screenshots use the parameter, since they cannot send headers, so it appears in access logs); any
+other request is passed to `next` as if devbar were not there. Give the widget the same key:
+`mount({ key })`, `<DevBar key="…" />` or `data-key` on a script tag. Screenshots and the script are sent with
 `Cross-Origin-Resource-Policy: cross-origin` so they load across origins whatever your server's
 defaults. The landing and demo pages are the standalone server's only (`pages: true` turns them on).
 `devbar.close()` stops watching the folder. A script tag works too: the widget takes its server
