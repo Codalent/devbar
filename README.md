@@ -46,11 +46,43 @@ the script after the first render.
 Other ways in:
 
 - `<script src="…/devbar.js" data-server="http://127.0.0.1:4800">` — talk to a server other than the
-  one the script came from.
+  one the script came from (by default, the script's address without `/devbar.js`).
 - `<script src="…/devbar.js" data-enabled="false">` — render nothing and make no request.
 - `import { mount } from "devbar/client"; mount({ server, enabled })` — the widget as a module, for a
   bundler. `enabled` defaults to `process.env.NODE_ENV === "development"`.
 - `<DevBar server="http://127.0.0.1:4800" enabled />` — the React props.
+
+### Inside your own server
+
+Instead of running `npx devbar`, mount devbar in the Node server your app already has, and import
+the widget in your frontend. Nothing else runs; the folder is the same.
+
+```js
+// backend (Express, Connect, or any Node http server)
+import { createDevbar } from "devbar/server";
+
+if (process.env.DEVBAR === "on") {
+  const devbar = await createDevbar({ dir: new URL("../.devbar", import.meta.url).pathname });
+  app.use("/devbar", devbar.handle); // before a JSON body parser, or exempt /devbar from it
+}
+```
+
+```js
+// frontend, in the browser (a client component in React or Next)
+const { mount } = await import("devbar/client");
+mount({ server: "https://api.example.dev/devbar", enabled: true });
+```
+
+`handle(req, res, next)` answers the paths below relative to where it is mounted, and calls `next`
+for any other. It reads the request body itself (an item with a screenshot is a few megabytes) and
+uses a body a parser already read. It applies no CORS and no access rules: your server's own apply,
+so a page on another origin needs that origin allowed, and anything that can reach the path can
+read and write the folder. Screenshots and the script are sent with
+`Cross-Origin-Resource-Policy: cross-origin` so they load across origins whatever your server's
+defaults. The landing and demo pages are the standalone server's only (`pages: true` turns them on).
+`devbar.close()` stops watching the folder. A script tag works too: the widget takes its server
+from the script's own address without `/devbar.js`, so `<script src="/devbar/devbar.js">` needs no
+`data-server`.
 
 Open `http://127.0.0.1:4711/demo` to try it on a sample page (`/demo?reset=1` adds an aggressive global
 CSS reset, to show the toolbar is unaffected by the host page's CSS).
@@ -213,7 +245,7 @@ request and no script can silence that, so the retries are kept few.
 
 ## Not in this version
 
-A Vite or Next plugin that starts the server with your dev server; GitHub Issues sync; assignees and
+A Vite or Next plugin; GitHub Issues sync; assignees and
 due dates; custom statuses; comments; use on a deployed staging site (it would need auth and a hosted
 store); recording the steps before a bug.
 

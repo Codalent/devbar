@@ -1,6 +1,6 @@
 {
   "name": "devbar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A dev toolbar that logs tasks, bugs and ideas from your running web app into Markdown files in your repository.",
   "license": "MIT",
   "type": "module",
@@ -9,6 +9,10 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     },
@@ -26,7 +30,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -35,7 +40,8 @@
     "build": "rm -rf dist && tsup",
     "dev": "tsup --watch",
     "start": "node dist/cli.js start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
@@ -58,5 +64,22 @@
     "react-dom": "^19.3.1",
     "tsup": "^9.0.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Codalent/devbar.git"
+  },
+  "homepage": "https://github.com/Codalent/devbar#readme",
+  "bugs": {
+    "url": "https://github.com/Codalent/devbar/issues"
+  },
+  "keywords": [
+    "devtools",
+    "toolbar",
+    "bug-report",
+    "kanban",
+    "markdown",
+    "feedback",
+    "ai-agents"
+  ]
 }
