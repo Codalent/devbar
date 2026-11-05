@@ -6,6 +6,8 @@ export const esc = (s: unknown): string =>
 export interface RenderOptions {
   /** Turns an image path in the file into a URL the board can load, or null to drop it. */
   image(src: string, alt: string): string | null;
+  /** The same for a link that is not http(s), such as a recording in assets/; null leaves it as text. */
+  link?(href: string): string | null;
 }
 
 function inline(text: string, o: RenderOptions): string {
@@ -24,9 +26,10 @@ function inline(text: string, o: RenderOptions): string {
     const url = o.image(src, alt);
     return url ? keep(`<img src="${esc(url)}" alt="${esc(alt)}" loading="lazy">`) : esc(alt);
   });
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) =>
-    /^https?:\/\//i.test(href) ? keep(`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`) : m,
-  );
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) => {
+    const url = /^https?:\/\//i.test(href) ? href : o.link?.(href);
+    return url ? keep(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`) : m;
+  });
   s = esc(s)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)/g, "$1<em>$2</em>")

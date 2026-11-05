@@ -40,6 +40,8 @@ export const CSS = `
 .dot .badge{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#fff;color:#0a0a0b;font:500 10px/16px var(--mono);
   box-shadow:0 0 0 2px rgba(10,10,11,.9),0 1px 3px rgba(0,0,0,.25);text-align:center;transition:opacity .2s,transform .3s var(--spring)}
 .dot.open .badge{opacity:0;transform:scale(.6)}
+.dot.rec::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--bug);animation:ring 1.6s var(--ease) infinite;pointer-events:none}
+@keyframes ring{0%{opacity:.9;transform:scale(.92)}70%,100%{opacity:0;transform:scale(1.25)}}
 .dot.off{background:#9c9ca3;border-color:#b5b5bb;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .dot.off svg path{stroke:#f4f4f5}
 .dot.off .badge{display:none}
@@ -59,7 +61,9 @@ export const CSS = `
 .pill kbd{font:10.5px var(--mono);color:var(--bar-muted);margin-left:4px;border:1px solid var(--bar-line);border-radius:5px;padding:0 5px;line-height:16px}
 .pills.show .pill{opacity:1;transform:translate(0,0) scale(1);pointer-events:auto}
 .pills.show .pill:nth-child(2){transition-delay:.05s}
-.pills:not(.show) .pill:nth-child(1){transition-delay:.04s}
+.pills.show .pill:nth-child(3){transition-delay:.1s}
+.pills:not(.show) .pill:nth-child(1){transition-delay:.08s}
+.pills:not(.show) .pill:nth-child(2){transition-delay:.04s}
 .pills:not(.show) .pill{transition-duration:.18s,.2s,.2s}
 
 /* form */
@@ -115,6 +119,40 @@ export const CSS = `
 .btn.danger{color:#ff9d9b}
 .btn.danger.armed{background:var(--bug);border-color:var(--bug);color:#0a0a0b}
 .btn:disabled{opacity:.5;cursor:default}
+.form footer .btn.armed{background:var(--bug);border-color:var(--bug);color:#0a0a0b}
+.vthumb{width:76px;aspect-ratio:16/10;border-radius:6px;background:#000;border:1px solid var(--bar-line-strong);position:relative;overflow:hidden;display:block}
+.vthumb video{width:100%;height:100%;object-fit:cover;display:block}
+.vthumb .play{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.25);transition:background .2s}
+.vthumb .play svg{width:16px;height:16px;color:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+.vthumb:hover .play{background:rgba(0,0,0,.05)}
+
+/* the recording bar */
+.recbar{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;height:46px;padding:0 6px 0 14px;border-radius:999px;z-index:6;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;animation:rise .4s var(--spring)}
+.recbar.dragging{cursor:grabbing}
+@keyframes rise{from{opacity:0;transform:translateX(-50%) translateY(16px)}}
+.recdot{width:10px;height:10px;border-radius:50%;background:var(--bug);box-shadow:0 0 0 4px rgba(255,107,107,.2);animation:blink 1.2s ease-in-out infinite;flex:none}
+@keyframes blink{50%{opacity:.35}}
+.reclabel{font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:#ff9d9b;width:46px}
+.rectime{font:500 14px var(--mono);min-width:44px;font-variant-numeric:tabular-nums}
+.meter{display:flex;align-items:center;gap:2px;height:18px;width:22px;margin:0 2px}
+.meter i{display:block;width:2.5px;height:3px;border-radius:2px;background:var(--ok);transition:height .1s linear}
+.nomic{display:grid;place-items:center;color:var(--warn)}
+.nomic svg{width:16px;height:16px}
+.rb{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px 0 11px;border-radius:999px;border:1px solid var(--bar-line-strong);background:var(--bar-surface);color:var(--bar-ink);font-weight:500;font-size:13px;transition:background .2s,border-color .2s,color .2s}
+.rb:hover{background:var(--bar-raised)}
+.rb svg{width:14px;height:14px;flex:none}
+.rb.pause{min-width:96px}
+.rb.pause.on{background:#fff;border-color:#fff;color:#0a0a0b}
+.rb.stop{background:var(--bug);border-color:var(--bug);color:#0a0a0b}
+.rb.stop:hover{background:#ff8585}
+.rb.discard{width:34px;padding:0;justify-content:center;color:var(--bar-muted)}
+.rb.discard:hover{color:#ff9d9b}
+.rb.discard.armed{background:var(--bug);border-color:var(--bug);color:#0a0a0b}
+.recbar.paused .recdot{background:var(--warn);box-shadow:0 0 0 4px rgba(251,191,36,.2);animation:none}
+.recbar.paused .reclabel{color:var(--warn)}
+.recbar.paused .rectime{animation:blink 1.6s ease-in-out infinite}
+.recbar.paused .meter i{background:var(--bar-muted)}
+.root.recording .toast{bottom:86px}
 
 /* board */
 .board{position:fixed;inset:16px;border-radius:16px;display:none;flex-direction:column;overflow:hidden;background:rgba(10,10,11,.92);z-index:1}
@@ -150,6 +188,7 @@ export const CSS = `
 .card .meta .pg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card .meta .pr{margin-left:auto;padding:0 7px;border-radius:999px;background:var(--bar-raised);font-family:var(--font);font-size:11px}
 .card .meta .pr.high{background:rgba(255,107,107,.16);color:#ff9d9b}
+.card .meta .vid{width:0;height:0;border-style:solid;border-width:4.5px 0 4.5px 7px;border-color:transparent transparent transparent var(--bug);flex:none}
 .card .meta .shot{width:12px;height:9px;border:1px solid var(--bar-muted);border-radius:2px;flex:none}
 .empty{border:1px dashed var(--bar-line-strong);border-radius:10px;padding:14px;font-size:12px;color:var(--bar-muted);text-align:center}
 .board .notice{padding:10px 16px;font-size:12.5px;color:var(--bar-muted);border-bottom:1px solid var(--bar-line)}
@@ -177,6 +216,8 @@ export const CSS = `
 .drawer img{max-width:100%;border-radius:8px;display:block}
 .drawer .shotbig{width:100%;border-radius:10px;overflow:hidden;position:relative;background:#f4f4f5;border:1px solid var(--bar-line-strong);margin:0 0 12px}
 .drawer .shotbig img{border-radius:0;width:100%}
+.drawer .player{width:100%;border-radius:10px;overflow:hidden;background:#000;border:1px solid var(--bar-line-strong);margin:0 0 8px}
+.drawer .player video{display:block;width:100%;max-height:60vh}
 .drawer textarea.raw{flex:1;margin:12px 16px;width:auto;font:12.5px/1.55 var(--mono);resize:none}
 .drawer .move{display:flex;gap:6px;flex-wrap:wrap;padding:12px 64px 12px 16px;border-top:1px solid var(--bar-line);align-items:center}
 .drawer .move span{font-size:12px;color:var(--bar-muted);margin-right:4px}

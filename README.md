@@ -4,7 +4,8 @@ A small dev toolbar for any web app. A dot sits in the corner of your app in dev
 log a **task, bug or idea** while you are looking at the problem, with a screenshot, the page, the
 browser, recent console errors and the element you point at. Each item is saved as a **Markdown file
 in your repository**, in a folder per status, where you, your team and your AI coding agent can pick
-it up. The same dot opens a **kanban board** of those files.
+it up. The same dot opens a **kanban board** of those files, and can **record your screen and voice**
+while you walk through what to fix.
 
 Nothing leaves your machine: a tiny local server reads and writes the files, and the widget only runs
 in development.
@@ -83,7 +84,8 @@ mount({ server: "https://api.example.dev/devbar", enabled: true, key: savedKey }
 
 `handle(req, res, next)` answers the paths below relative to where it is mounted, and calls `next`
 for any other. It reads the request body itself (an item with a screenshot is a few megabytes) and
-uses a body a parser already read. It applies no CORS and no access rules: your server's own apply,
+uses a body a parser already read (a recording can be hundreds of megabytes; send it raw, not
+through a JSON parser). It applies no CORS and no access rules: your server's own apply,
 so a page on another origin needs that origin allowed (and the `X-Devbar-Key` header, with a key).
 Without a key, anything that can reach the path can read and write the folder. With `key`, every
 request must carry it, as an `X-Devbar-Key` header or a `key` query parameter (the event stream and
@@ -105,7 +107,7 @@ CSS reset, to show the toolbar is unaffected by the host page's CSS).
   along it) or, near a corner, to the corner, and remembers where you put it. The badge counts items in
   **Open** and **In progress**. A grey dot means the server is not running: hover it for the hint; it
   reconnects by itself when the server comes back and you return to the tab.
-- **Click the dot** and two pills unfold: **New task** and **Board**.
+- **Click the dot** and three pills unfold: **New task**, **Board** and **Record**.
 - **The form** has a title, a Markdown description, a priority and a row of **Attach** switches. Each
   shows what it will attach:
 
@@ -119,12 +121,25 @@ CSS reset, to show the toolbar is unaffected by the host page's CSS).
 
   Your last choice per type is remembered in the browser; `config.json` can change the defaults.
   **Cancel** writes nothing; what was collected is dropped.
+- **Record** asks which screen, window or tab to share, then your microphone, and starts recording
+  both. A bar at the bottom of the page shows the time, a level meter for your voice, and three
+  buttons: **Pause** (and **Resume**), **Stop**, and **Discard** (press it twice). A paused stretch is
+  left out of the video, so you can stop and think. Drag the bar anywhere by its edge. While it runs
+  the dot has a red ring. **Stop**, or the browser's own "Stop sharing" button, opens the form with
+  the video attached: its length, size, and a preview you can click to watch in a new tab. Give it a
+  title and save; Cancel asks once more before dropping the video. Leaving the page while a recording
+  runs or waits to be saved asks first, since the video exists only in the page until it is saved.
+  Without a microphone it records the screen with no sound and says so. It works in desktop Chrome,
+  Edge, Firefox and Safari on a secure page (`localhost` counts), not on phones; Chrome and Firefox
+  save WebM, Safari MP4.
 - **The board** has five columns. Drag a card to move its file; click a card to read it, edit the
   Markdown, move it or delete it (delete asks twice). Edits you make in your editor show up on the
   board at once.
 
-Keyboard: `Esc` closes whatever is open; with the dot open, `N` = new item and `B` = board;
-`Ctrl/⌘ + Shift + .` opens and closes the board from anywhere; `Ctrl/⌘ + Enter` saves the form.
+Keyboard: `Esc` closes whatever is open; with the dot open, `N` = new item, `B` = board and
+`R` = record; `Ctrl/⌘ + Shift + .` opens and closes the board from anywhere; `Ctrl/⌘ + Enter` saves the
+form. While recording, from anywhere in the page: `Alt/⌥ + Shift + P` pauses and resumes,
+`Alt/⌥ + Shift + S` stops; `Alt/⌥ + Shift + R` starts a recording.
 
 ## The files
 
@@ -136,7 +151,7 @@ Keyboard: `Esc` closes whatever is open; with the dot open, `N` = new item and `
   in-progress/
   ready/          approved: ready to build
   closed/         done
-  assets/         screenshots
+  assets/         screenshots and screen recordings
 ```
 
 Each item is one file named `NNN-short-slug.md`. The three-digit id is unique across the five folders;
@@ -174,6 +189,21 @@ On an iPhone-sized window the Sign in button sits on top of the logo.
 ## Console errors at the time
 - Warning: Each child in a list should have a unique "key" prop. (Login.tsx:42)
 ```
+
+An item saved with a recording has two more fields, and a link to the video under the description:
+
+```markdown
+recording: assets/004-recording.webm
+recordingDuration: "2:31"
+---
+
+The three things to fix on the agents page, in order.
+
+[Screen recording, 2:31](../assets/004-recording.webm)
+```
+
+The board plays it above that link. A recording is about 15 MB a minute; if you would rather not
+commit them, add `.devbar/assets/*-recording.*` to `.gitignore`.
 
 Only the switches that were on produce a field and a section. The status is the folder, not a field.
 `screenshot` is relative to `.devbar/`; the image link in the body climbs one folder (`../assets/…`) so
@@ -225,13 +255,14 @@ request whose `Host` is not a loopback name. It never touches a path outside the
 |---|---|
 | `GET /api/health` | `{ name, version, dir, counts, config }` |
 | `GET /api/items` | every item with its status and front matter |
-| `POST /api/items` | create: `{ type, title, description, priority, status?, context? }`; the server assigns the id and file name. `context` may hold `page`, `browser`, `console`, `element` and `screenshot` (a PNG data URL) |
+| `POST /api/items` | create: `{ type, title, description, priority, status?, context? }`; the server assigns the id and file name. `context` may hold `page`, `browser`, `console`, `element`, `screenshot` (a PNG data URL) and `recording` (`{ mimeType, duration }`: the file names the video, which follows) |
+| `PUT /api/items/:id/recording` | the video itself, as the raw body with `Content-Type: video/webm` or `video/mp4` (up to 2 GB), for an item created with `context.recording` |
 | `GET /api/items/:id` | one item, with its raw `markdown` and `body` |
 | `PUT /api/items/:id` | `{ markdown }` replaces the file; or `{ title?, type?, priority? }` edits those fields |
 | `POST /api/items/:id/move` | `{ status }` moves the file |
-| `DELETE /api/items/:id` | deletes the file and the screenshot it made |
+| `DELETE /api/items/:id` | deletes the file and the screenshot and recording it made |
 | `GET /api/events` | Server-Sent Events: `change` whenever a file in the folder changes |
-| `GET /assets/:name` | a stored screenshot |
+| `GET /assets/:name` | a stored screenshot or recording (with `Range` support, so a player can seek) |
 | `GET /devbar.js` | the widget |
 | `GET /demo` | a sample page with the widget |
 
