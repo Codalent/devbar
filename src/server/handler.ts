@@ -59,6 +59,25 @@ export async function readVersion(): Promise<string> {
 
 const digest = (value: string) => createHash("sha256").update(value).digest();
 
+/** In dist/devbar.js; switched on in the copy this backend serves (the same length, so the source map still fits). */
+const SERVED_OFF = "devbar:served-by-backend=0";
+const SERVED_ON = "devbar:served-by-backend=1";
+let widgetCache: { file: string; mtime: number; body: string } | null = null;
+
+/**
+ * The widget as this backend serves it: marked so a script tag that loads it from here talks to
+ * this backend without a `data-server`. Read again when the file changes (`pnpm dev`).
+ */
+async function servedWidget(): Promise<string> {
+  const file = await widgetBundlePath();
+  const mtime = (await stat(file)).mtimeMs;
+  if (widgetCache?.file !== file || widgetCache.mtime !== mtime) {
+    const body = (await readFile(file, "utf8")).replace(SERVED_OFF, SERVED_ON);
+    widgetCache = { file, mtime, body };
+  }
+  return widgetCache.body;
+}
+
 /** The widget bundle sits next to this file in dist/. */
 async function widgetBundlePath(): Promise<string> {
   for (const candidate of [path.join(here, "devbar.js"), path.join(here, "..", "..", "dist", "devbar.js")]) {
@@ -204,7 +223,7 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
       case "GET /demo/login":
         if (!options.pages) break;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-        return void res.end(demoPage({ page: parts[1] === "login" ? "login" : "agents", reset: url.searchParams.has("reset"), disabled: url.searchParams.has("disabled") }));
+        return void res.end(demoPage({ page: parts[1] === "login" ? "login" : "agents", reset: url.searchParams.has("reset"), disabled: url.searchParams.has("disabled"), standalone: url.searchParams.has("standalone") }));
       case "GET /devbar.js.map": {
         const file = `${await widgetBundlePath()}.map`;
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache", ...embeddable });
@@ -212,10 +231,9 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
         return;
       }
       case "GET /devbar.js": {
-        const file = await widgetBundlePath();
+        const body = await servedWidget();
         res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-cache", ...embeddable });
-        createReadStream(file).pipe(res);
-        return;
+        return void res.end(body);
       }
       case "GET /api/health":
         return send(res, 200, { name: NAME, version, dir: dataDir, counts: await store.counts(), config: widgetConfig() });

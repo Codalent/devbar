@@ -1,4 +1,4 @@
-import { NAME } from "../name.js";
+import { NAME, PACKAGE } from "../name.js";
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -23,17 +23,18 @@ a{color:#18181b}
 <p>Project <b>${esc(o.project)}</b>, files in <code>${esc(o.dir)}/</code>. The dot in the corner of this page is the toolbar; its Board pill opens the board.</p>
 <p>Add it to your app in development with one line:</p>
 <pre>${esc(tag)}</pre>
-<p>React and Next: <code>import { DevBar } from "${NAME}/react"</code> and render <code>&lt;DevBar /&gt;</code> once in the root layout.</p>
-<p><a href="/demo">Open the demo page</a> · <a href="/demo?reset=1">the same with an aggressive global CSS reset</a></p>
+<p>React and Next: <code>import { DevBar } from "${PACKAGE}/react"</code> and render <code>&lt;DevBar server="${esc(o.serverUrl)}" /&gt;</code> once in the root layout.</p>
+<p><a href="/demo">Open the demo page</a> · <a href="/demo?reset=1">the same with an aggressive global CSS reset</a> · <a href="/demo?standalone=1">with no backend (Save downloads)</a></p>
 </main></body></html>`;
 }
 
 /**
  * `GET /demo`: a small, realistic host app with the widget loaded from this server, to exercise the
  * whole flow. `?reset=1` adds an aggressive global CSS reset to show the widget is unaffected;
- * `?disabled=1` loads the script with data-enabled="false", which must render and request nothing.
+ * `?disabled=1` loads the script with data-enabled="false", which must render and request nothing;
+ * `?standalone=1` loads it with data-server="", as if there were no backend: Save downloads.
  */
-export function demoPage(o: { page: "agents" | "login"; reset: boolean; disabled?: boolean }): string {
+export function demoPage(o: { page: "agents" | "login"; reset: boolean; disabled?: boolean; standalone?: boolean }): string {
   const reset = o.reset
     ? `<style id="aggressive-reset">
 /* An aggressive global reset, of the kind some apps ship: it must not change the toolbar. */
@@ -87,7 +88,7 @@ div{display:block!important}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${o.page === "login" ? "Sign in — Orbik" : "Agents — Orbik"}</title>
 <!-- The toolbar, loaded early so it hears console errors from the start. -->
-<script src="/${NAME}.js"${o.disabled ? ' data-enabled="false"' : ""}></script>
+<script src="/${NAME}.js"${o.disabled ? ' data-enabled="false"' : ""}${o.standalone ? ' data-server=""' : ""}></script>
 <style>
 :root{--host-bg:#f4f4f5;--host-surface:#fff;--host-ink:#18181b;--host-muted:#71717a;--host-line:#e4e4e7;--host-brand:#2f5d50;color-scheme:light}
 *{box-sizing:border-box}

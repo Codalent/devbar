@@ -24,7 +24,8 @@ Options
 
 Then add one line to your app, in development only:
   <script src="http://127.0.0.1:${DEFAULT_PORT}/${NAME}.js"></script>
-or, in React / Next:  import { DevBar } from "${PACKAGE}/react"  and render <DevBar /> once.
+or, in React / Next:  import { DevBar } from "${PACKAGE}/react"
+                      and render <DevBar server="http://127.0.0.1:${DEFAULT_PORT}" /> once.
 `;
 
 const MARKER = `<!-- ${NAME}: task folders -->`;

@@ -4,14 +4,19 @@ import { loadFonts } from "./fonts.js";
 import { Toolbar } from "./widget.js";
 
 export interface MountOptions {
-  /** The devbar server, e.g. http://127.0.0.1:4711. */
+  /**
+   * Your devbar backend, e.g. `http://127.0.0.1:4711` (the local server) or
+   * `https://api.example.com/devbar` (one you mounted or wrote). Leave it out and there is no
+   * backend: Save downloads each item as a Markdown file (a zip when it has a screenshot), and
+   * there is no board.
+   */
   server?: string;
   /**
    * Show the toolbar. Defaults to true only when it can tell it is in development
    * (process.env.NODE_ENV === "development" as your bundler sets it); otherwise nothing renders.
    */
   enabled?: boolean;
-  /** The server's shared key, when it was started with one (`createDevbar({ key })`). */
+  /** The backend's shared key, when it has one (`createDevbar({ key })`). Sent as `X-Devbar-Key`. */
   key?: string;
 }
 
@@ -38,7 +43,7 @@ export function mount(options: MountOptions = {}): void {
   const w = window as unknown as Record<string, unknown>;
   if (current || w[GLOBAL_NAME]) return; // loaded twice: keep the first
   installConsoleBuffer(null);
-  const server = options.server ?? "http://127.0.0.1:4711";
+  const server = options.server?.trim() || null;
   const start = () => {
     if (current) return;
     current = new Toolbar(server, options.key);

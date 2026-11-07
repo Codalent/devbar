@@ -24,6 +24,10 @@ export default defineConfig([
     minify: true,
     noExternal: [/.*/],
     outExtension: () => ({ js: ".js" }),
+    // ASCII only, so it runs whatever charset the host serving it sends (a CDN, a static folder).
+    esbuildOptions(o) {
+      o.charset = "ascii";
+    },
     define: { ...define, "process.env.NODE_ENV": JSON.stringify("development") },
     // The widget wraps console.warn and console.error. Its source map puts the whole bundle on
     // Chrome's ignore list, so DevTools shows the page's own line for a warning, not devbar.js.
@@ -45,18 +49,21 @@ export default defineConfig([
     target: "es2020",
     dts: true,
     noExternal: ["html-to-image"],
+    esbuildOptions(o) {
+      o.charset = "ascii";
+    },
     // esbuild fills in process.env.NODE_ENV for browser builds; leave it for the host's bundler,
     // which decides whether the toolbar is on.
     define: { ...define, "process.env.NODE_ENV": "process.env.NODE_ENV" },
   },
-  // devbar/react: a tiny loader component; React stays the host's.
+  // devbar/react: a tiny component that imports devbar/client when it is on; React stays the host's.
   {
     entry: { react: "src/react.ts" },
     format: ["esm", "cjs"],
     platform: "neutral",
     target: "es2020",
     dts: true,
-    external: ["react"],
+    external: ["react", "@codalent/devbar/client"],
     define: { "process.env.NODE_ENV": "process.env.NODE_ENV" },
   },
 ]);

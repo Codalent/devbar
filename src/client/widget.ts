@@ -1,13 +1,14 @@
 import {
   DEFAULT_TOGGLES,
-  DIR_NAME,
   ELEMENT_NAME,
   GLOBAL_NAME,
   NAME,
   PACKAGE,
+  PRIORITIES,
   STATUSES,
   STATUS_LABELS,
   STORAGE_PREFIX,
+  TYPES,
   type ContextKey,
   type ItemType,
   type Position,
@@ -25,8 +26,10 @@ import {
   selectorFor,
   type PickedElement,
 } from "./context.js";
+import { buildMarkdown, localTimestamp, slugify, type CreateInput } from "../item.js";
 import { esc, renderMarkdown } from "./markdown.js";
 import { CSS } from "./styles.js";
+import { dataUrlBytes, zip } from "./zip.js";
 
 declare const __VERSION__: string;
 const VERSION = typeof __VERSION__ === "string" ? __VERSION__ : "dev";
@@ -62,7 +65,6 @@ const SIZE = 36;
 const M = 16;
 const CORNER = 110;
 const TYPE_COLOR: Record<ItemType, string> = { bug: "var(--bug)", task: "var(--task)", idea: "var(--idea)" };
-const OFFLINE = `Not connected. Run npx ${PACKAGE} in the project folder.`;
 
 const ICON_PLUS = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 const ICON_PEN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
@@ -71,7 +73,7 @@ const ICON_BOARD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const TEMPLATE = `
 <div class="root">
   <button class="dot" aria-label="${NAME}" aria-expanded="false">${ICON_PLUS}<span class="badge" hidden>0</span></button>
-  <div class="tip" role="tooltip">Not connected. Run <code>npx ${PACKAGE}</code> in the project folder.</div>
+  <div class="tip" role="tooltip"></div>
   <div class="pills h rev">
     <button class="pill glass" data-act="new">${ICON_PEN}New task<kbd>N</kbd></button>
     <button class="pill glass" data-act="board">${ICON_BOARD}Board<kbd>B</kbd></button>
@@ -153,23 +155,6 @@ function store<T>(key: string, value?: T): T | null {
   return null;
 }
 
-function slugify(title: string): string {
-  return (
-    title
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/['’"“”]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .split("-")
-      .slice(0, 7)
-      .join("-")
-      .slice(0, 60)
-      .replace(/-+$/g, "") || "untitled"
-  );
-}
-
 /** A host element the page's CSS cannot move, hide or restyle. */
 const HOST_STYLE = [
   "all:initial",
@@ -194,10 +179,61 @@ const HOST_STYLE = [
   .map((d) => `${d} !important`)
   .join(";");
 
+/** What the widget assumes until a backend says otherwise, and all it has without one. */
+const DEFAULT_CONFIG: WidgetConfig = {
+  project: "",
+  dir: "",
+  position: "bottom-right",
+  shortcut: "mod+shift+.",
+  toggles: {},
+  folders: Object.fromEntries(STATUSES.map((s) => [s, s])) as Record<Status, string>,
+  assets: "assets",
+};
+
+/** An item as any backend sends it, with the fields the board needs filled in. */
+function normalizeItem(input: Record<string, unknown>): FullItem {
+  const raw = input as Partial<FullItem> & Record<string, unknown>;
+  const fm = raw.frontMatter && typeof raw.frontMatter === "object" ? raw.frontMatter : {};
+  const key = String(raw.key ?? raw.id ?? raw.file ?? "");
+  const markdown = typeof raw.markdown === "string" ? raw.markdown : "";
+  return {
+    ...raw,
+    id: raw.id != null ? String(raw.id) : null,
+    key,
+    file: raw.file ?? `${key}.md`,
+    status: STATUSES.includes(raw.status as Status) ? (raw.status as Status) : "open",
+    path: raw.path ?? raw.file ?? key,
+    title: raw.title ?? key,
+    type: TYPES.includes(raw.type as ItemType) ? (raw.type as ItemType) : "task",
+    priority: PRIORITIES.includes(raw.priority as Priority) ? (raw.priority as Priority) : "normal",
+    page: raw.page ?? null,
+    screenshot: raw.screenshot ?? (typeof fm.screenshot === "string" ? fm.screenshot : null),
+    created: raw.created ?? null,
+    hasFrontMatter: raw.hasFrontMatter ?? /^---\r?\n/.test(markdown),
+    frontMatter: fm,
+    markdown,
+    body: typeof raw.body === "string" ? raw.body : markdown.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, ""),
+  };
+}
+
+function downloadBlob(parent: Node, name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.style.display = "none";
+  parent.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoking at once can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export class Toolbar {
   readonly host: HTMLElement;
   private readonly root: ShadowRoot;
-  private readonly server: string;
+  /** The backend, or null: then Save downloads the item and there is no board. */
+  private readonly server: string | null;
   /** Sent with every request: a header where it can be, a `key` parameter where it cannot. */
   private readonly key: string | null;
 
@@ -237,8 +273,11 @@ export class Toolbar {
   private observer: MutationObserver | null = null;
   private readonly cleanups: Array<() => void> = [];
 
-  constructor(server: string, key?: string) {
-    this.server = server.replace(/\/+$/, "");
+  /** The backend has no event stream (or it keeps failing): refresh when the tab comes back instead. */
+  private noEvents = false;
+
+  constructor(server?: string | null, key?: string) {
+    this.server = server ? server.replace(/\/+$/, "") : null;
     this.key = key || null;
     if (!customElements.get(ELEMENT_NAME)) customElements.define(ELEMENT_NAME, class extends HTMLElement {});
     this.host = document.createElement(ELEMENT_NAME);
@@ -246,8 +285,20 @@ export class Toolbar {
     this.host.setAttribute("data-version", VERSION);
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${CSS}</style>${TEMPLATE}`;
+    if (this.server) {
+      this.$(".tip").innerHTML = `Not connected to <code>${esc(this.server)}</code>. Start the backend (the local one: <code>npx ${PACKAGE}</code>); it reconnects by itself.`;
+    }
     this.restorePosition();
     this.bind();
+  }
+
+  /** No backend configured: items are downloaded, there is no board. */
+  private get local(): boolean {
+    return !this.server;
+  }
+
+  private get offline(): string {
+    return `Not connected to ${this.server}. Start the backend (the local one: npx ${PACKAGE}).`;
   }
 
   // ------------------------------------------------------------------ lifecycle
@@ -261,7 +312,11 @@ export class Toolbar {
     this.observer.observe(document.body, { childList: true });
     this.placeDot();
     this.renderToggles();
-    void this.connect();
+    if (this.local) {
+      // Nothing to connect to: the form works, Save downloads.
+      this.connected = true;
+      this.$(".dot").setAttribute("aria-label", `${NAME}: new item (saved as a download)`);
+    } else void this.connect();
   }
 
   destroy(): void {
@@ -306,7 +361,7 @@ export class Toolbar {
       });
     } catch {
       this.lostConnection();
-      throw new Error(OFFLINE);
+      throw new Error(this.offline);
     }
     const body = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } };
     if (!res.ok) throw new Error(body.error?.message || `${res.status} ${res.statusText}`);
@@ -322,10 +377,6 @@ export class Toolbar {
     this.toastTimer = setTimeout(() => t.classList.remove("show"), bad ? 4200 : 2800);
   }
 
-  private get dir(): string {
-    return this.config?.dir ?? DIR_NAME;
-  }
-
   // ------------------------------------------------------------------ connection
 
   private async connect(): Promise<void> {
@@ -336,13 +387,13 @@ export class Toolbar {
     try {
       const res = await fetch(`${this.server}/api/health`, { cache: "no-store", headers: this.keyHeader() });
       if (!res.ok) throw new Error(String(res.status));
-      const health = (await res.json()) as { config?: WidgetConfig };
-      if (health.config) this.applyConfig(health.config);
+      const health = (await res.json().catch(() => ({}))) as { config?: Partial<WidgetConfig> };
+      this.applyConfig(health.config ?? {});
       this.setConnected(true);
       this.retryDelay = 2000;
       this.retriesLeft = 5;
       await this.refresh();
-      this.openEvents();
+      if (!this.noEvents) this.openEvents();
     } catch {
       this.lostConnection();
     } finally {
@@ -357,7 +408,7 @@ export class Toolbar {
     if (!this.noticed) {
       this.noticed = true;
       // The one console line: quiet, and never repeated while the page is open.
-      console.info(`[${NAME}] Not connected to ${this.server}. Run \`npx ${PACKAGE}\` in the project folder; the toolbar reconnects on its own.`);
+      console.info(`[${NAME}] Not connected to ${this.server}. Start the backend (the local one: \`npx ${PACKAGE}\`); the toolbar reconnects on its own.`);
     }
     // Back off: 2, 4, 8, 16 and 32 s, then stop polling. The browser itself logs every refused
     // request, which no script can silence, so after that the toolbar only retries when the tab
@@ -390,34 +441,72 @@ export class Toolbar {
         // ignore a malformed frame
       }
     });
-    es.addEventListener("open", () => this.$(".live").classList.add("on"));
+    let opened = false;
+    es.addEventListener("open", () => {
+      opened = true;
+      this.setLive();
+    });
     es.onerror = () => {
       // Close at once: EventSource would retry every few seconds and fill the console.
-      if (this.events === es) this.lostConnection();
-      else es.close();
+      es.close();
+      if (this.events !== es) return;
+      this.events = null;
+      this.setLive();
+      void this.afterStreamError(opened);
     };
+  }
+
+  /**
+   * The event stream is optional for a backend. When it fails, ask whether the backend is still
+   * there: if not, the connection is lost; if it is, reopen a stream that had been working, and
+   * give up on one that never opened (the board then refreshes when the tab comes back).
+   */
+  private async afterStreamError(hadOpened: boolean) {
+    try {
+      const res = await fetch(`${this.server}/api/health`, { cache: "no-store", headers: this.keyHeader() });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch {
+      return this.lostConnection();
+    }
+    if (hadOpened) this.openEvents();
+    else {
+      this.noEvents = true;
+      this.setLive();
+    }
+  }
+
+  private setLive() {
+    const on = this.connected && !!this.events && this.events.readyState === EventSource.OPEN;
+    this.$(".live").classList.toggle("on", on);
+    this.$(".live span").textContent = !this.connected ? "not connected" : this.noEvents ? "refreshes when you return to the tab" : "live";
+  }
+
+  /** Without an event stream, catch up when someone comes back to the tab. */
+  private catchUp() {
+    if (this.connected && this.noEvents && !this.local) void this.refresh(true);
   }
 
   private setConnected(on: boolean) {
     this.connected = on;
     const dot = this.$(".dot");
     dot.classList.toggle("off", !on);
-    dot.setAttribute("aria-label", on ? NAME : `${NAME}: ${OFFLINE}`);
-    this.$(".live").classList.toggle("on", on && !!this.events);
-    this.$(".live span").textContent = on ? "watching folder" : "not connected";
+    dot.setAttribute("aria-label", on ? NAME : `${NAME}: ${this.offline}`);
+    this.setLive();
     const notice = this.$(".board .notice");
     notice.hidden = on;
-    notice.textContent = OFFLINE;
+    notice.textContent = this.offline;
     if (!on) {
       this.setOpen(false);
       this.$(".badge").hidden = true;
     }
   }
 
-  private applyConfig(config: WidgetConfig) {
+  /** The backend's config, any part of it; what it leaves out keeps the default. */
+  private applyConfig(partial: Partial<WidgetConfig>) {
     const first = !this.config;
+    const config: WidgetConfig = { ...DEFAULT_CONFIG, ...partial, folders: { ...DEFAULT_CONFIG.folders, ...(partial.folders ?? {}) } };
     this.config = config;
-    this.$(".board header .path").textContent = `${config.dir}/ in ${config.project}`;
+    this.$(".board header .path").textContent = [config.dir && `${config.dir}/`, config.project].filter(Boolean).join(" in ") || (this.server ?? "");
     if (first && !store("position")) this.restorePosition();
     this.renderToggles();
     this.updatePath();
@@ -426,8 +515,8 @@ export class Toolbar {
   private async refresh(fromDisk = false): Promise<void> {
     if (!this.connected) return;
     try {
-      const data = await this.api<{ items: Item[] }>("/api/items");
-      this.items = data.items;
+      const data = await this.api<{ items?: Array<Record<string, unknown>> }>("/api/items");
+      this.items = (Array.isArray(data.items) ? data.items : []).map((raw) => normalizeItem(raw));
       this.updateBadge();
       if (this.boardOpen) this.renderBoard();
       if (this.drawer && !this.editing && fromDisk) {
@@ -614,6 +703,8 @@ export class Toolbar {
       }
       if (this.formOpen) return this.hideForm();
       if (this.boardOpen) return this.closeBoard();
+      // Without a backend there is no board, so the one thing to do is a new item.
+      if (this.local) return this.openForm("task");
       this.setOpen(!this.open);
     });
     dot.addEventListener("mouseenter", () => {
@@ -713,9 +804,14 @@ export class Toolbar {
       this.placeDot();
     });
     this.listen(document, "visibilitychange", () => {
-      if (document.visibilityState === "visible") this.retrySoon();
+      if (document.visibilityState !== "visible") return;
+      this.retrySoon();
+      this.catchUp();
     });
-    this.listen(window, "focus", () => this.retrySoon());
+    this.listen(window, "focus", () => {
+      this.retrySoon();
+      this.catchUp();
+    });
   }
 
   private onKey(e: KeyboardEvent) {
@@ -741,7 +837,10 @@ export class Toolbar {
       e.preventDefault();
       e.stopPropagation();
       if (this.boardOpen) this.closeBoard();
-      else this.openBoard();
+      else if (this.local) {
+        if (this.formOpen) this.hideForm();
+        else this.openForm("task");
+      } else this.openBoard();
       return;
     }
     if (inside && this.formOpen && (e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -796,7 +895,7 @@ export class Toolbar {
 
   private openForm(type: ItemType) {
     if (!this.connected) {
-      this.toast(OFFLINE, undefined, true);
+      this.toast(this.offline, undefined, true);
       this.retrySoon();
       return;
     }
@@ -901,10 +1000,29 @@ export class Toolbar {
     return String(max + 1).padStart(3, "0");
   }
 
+  /** Where Save puts the item: the file the local backend will write, or the download. */
   private updatePath() {
     const t = this.$<HTMLInputElement>("input[name=title]").value.trim();
-    const folder = this.config?.folders.open ?? "open";
-    this.$(".form footer .path").textContent = `→ ${this.dir}/${folder}/${this.nextId()}-${t ? slugify(t) : "untitled"}.md`;
+    const slug = t ? slugify(t) : "untitled";
+    const el = this.$(".form footer .path");
+    if (this.local) {
+      el.textContent = `↓ ${this.downloadBase(slug)}${this.willZip() ? ".zip" : ".md"}`;
+      el.title = this.willZip() ? "Downloads a zip: the Markdown file and its screenshot" : "Downloads the Markdown file";
+    } else if (this.config?.dir) {
+      el.textContent = `→ ${this.config.dir}/${this.config.folders.open}/${this.nextId()}-${slug}.md`;
+    } else {
+      el.textContent = `→ ${new URL(this.server!, location.href).host}`;
+    }
+  }
+
+  /** A download's name: the type, then the title, e.g. `bug-login-button-overlaps-logo`. */
+  private downloadBase(slug: string): string {
+    return `${this.type}-${slug}`;
+  }
+
+  /** The download is a zip when it has a file to go with the Markdown. */
+  private willZip(): boolean {
+    return this.toggles(this.type).screenshot && this.shot.state !== "error";
   }
 
   private renderToggles() {
@@ -948,6 +1066,7 @@ export class Toolbar {
         if (this.picked) d.title = this.picked.selector;
       }
     }
+    this.updatePath();
   }
 
   private boxHtml(rect?: { x: number; y: number; w: number; h: number } | null): string {
@@ -986,13 +1105,18 @@ export class Toolbar {
       }
       if (t.console) context.console = consoleEntries().map(({ level, message, source }) => ({ level, message, source }));
       if (this.type === "bug" && t.element && this.picked) context.element = this.picked;
-      const { item } = await this.api<{ item: Item }>("/api/items", {
-        method: "POST",
-        json: { type: this.type, title, description: this.$<HTMLTextAreaElement>("textarea[name=desc]").value, priority: this.priority, context },
-      });
+      const input: CreateInput = { type: this.type, title, description: this.$<HTMLTextAreaElement>("textarea[name=desc]").value, priority: this.priority, context };
+      if (this.local) {
+        const name = this.download(input);
+        this.hideForm();
+        this.resetDraft();
+        this.toast(noShot ? "Downloaded without a screenshot" : "Downloaded", name, noShot);
+        return;
+      }
+      const { item } = await this.api<{ item: Record<string, unknown> }>("/api/items", { method: "POST", json: input });
       this.hideForm();
       this.resetDraft();
-      this.toast(noShot ? "Saved without a screenshot" : "Saved", item.path, noShot);
+      this.toast(noShot ? "Saved without a screenshot" : "Saved", item ? normalizeItem(item).path : undefined, noShot);
       await this.refresh();
     } catch (error) {
       this.toast(`Not saved: ${(error as Error).message}`, undefined, true);
@@ -1001,6 +1125,31 @@ export class Toolbar {
       button.disabled = false;
       button.textContent = "Save";
     }
+  }
+
+  /**
+   * No backend: the item as the Markdown file a backend would write, downloaded. With a screenshot
+   * it is a zip laid out like the data folder (`open/…md` and `assets/…png`), so the image link
+   * works wherever it is unzipped, and unzipping it into `.devbar/` puts it on the board.
+   */
+  private download(input: CreateInput): string {
+    const base = this.downloadBase(slugify(input.title ?? ""));
+    const shot = input.context?.screenshot;
+    const now = localTimestamp();
+    if (!shot) {
+      const markdown = buildMarkdown(input, { id: null, screenshot: null, now });
+      downloadBlob(this.root, `${base}.md`, new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      return `${base}.md`;
+    }
+    const assets = DEFAULT_CONFIG.assets;
+    const screenshot = `${assets}/${base}-screenshot.png`;
+    const markdown = buildMarkdown(input, { id: null, screenshot, now });
+    const archive = zip([
+      { name: `${DEFAULT_CONFIG.folders.open}/${base}.md`, data: new TextEncoder().encode(markdown) },
+      { name: screenshot, data: dataUrlBytes(shot) },
+    ]);
+    downloadBlob(this.root, `${base}.zip`, archive);
+    return `${base}.zip`;
   }
 
   // ------------------------------------------------------------------ element picker
@@ -1063,8 +1212,9 @@ export class Toolbar {
   // ------------------------------------------------------------------ the board
 
   private openBoard() {
+    if (this.local) return; // no backend, no board
     if (!this.connected) {
-      this.toast(OFFLINE, undefined, true);
+      this.toast(this.offline, undefined, true);
       this.retrySoon();
       return;
     }
@@ -1142,8 +1292,8 @@ export class Toolbar {
     this.updateBadge();
     this.renderBoard();
     try {
-      const { item: moved } = await this.api<{ item: Item }>(`/api/items/${encodeURIComponent(key)}/move`, { method: "POST", json: { status } });
-      this.toast("Moved", `${this.dir}/${this.config?.folders[from] ?? from}/ → ${moved.path}`);
+      const { item: moved } = await this.api<{ item?: Record<string, unknown> }>(`/api/items/${encodeURIComponent(key)}/move`, { method: "POST", json: { status } });
+      this.toast(`Moved to ${STATUS_LABELS[status]}`, moved ? normalizeItem(moved).path : undefined);
       if (this.drawer?.key === key) void this.openDrawer(key, true);
     } catch (error) {
       item.status = from;
@@ -1155,7 +1305,7 @@ export class Toolbar {
 
   private async openDrawer(key: string, quiet = false) {
     try {
-      const { item } = await this.api<{ item: FullItem }>(`/api/items/${encodeURIComponent(key)}`);
+      const item = normalizeItem((await this.api<{ item: Record<string, unknown> }>(`/api/items/${encodeURIComponent(key)}`)).item ?? {});
       this.editing = this.editing && this.drawer?.key === key;
       if (!this.editing) this.renderDrawer(item);
       this.drawer = item;
@@ -1238,7 +1388,7 @@ export class Toolbar {
     if (!this.drawer) return;
     const markdown = this.$<HTMLTextAreaElement>(".drawer .raw").value;
     try {
-      const { item } = await this.api<{ item: FullItem }>(`/api/items/${encodeURIComponent(this.drawer.key)}`, { method: "PUT", json: { markdown } });
+      const item = normalizeItem((await this.api<{ item: Record<string, unknown> }>(`/api/items/${encodeURIComponent(this.drawer.key)}`, { method: "PUT", json: { markdown } })).item ?? {});
       this.editing = false;
       this.drawer = item;
       this.renderDrawer(item);
@@ -1282,6 +1432,8 @@ export class Toolbar {
       name: NAME,
       version: VERSION,
       server: this.server,
+      /** "download" without a backend, else "server". */
+      mode: this.local ? "download" : "server",
       element: this.host,
       get connected() {
         return self.connected;

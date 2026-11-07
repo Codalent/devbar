@@ -10,7 +10,9 @@
     "esModuleInterop": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // <DevBar /> imports the widget by its package name; point that at the source here.
+    "paths": { "@codalent/devbar/client": ["./src/client/index.ts"] }
   },
   "include": ["src"]
 }

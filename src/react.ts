@@ -1,21 +1,21 @@
 "use client";
-import { createElement, useEffect, version } from "react";
+import { useEffect } from "react";
 
 export interface DevBarProps {
-  /** The devbar server. Default http://127.0.0.1:4711. */
+  /**
+   * Your devbar backend, e.g. `http://127.0.0.1:4711` (the local server) or
+   * `https://api.example.com/devbar`. Leave it out and there is no backend: Save downloads each
+   * item as a Markdown file (a zip when it has a screenshot), and there is no board.
+   */
   server?: string;
   /**
    * Force it on or off. By default it renders only when process.env.NODE_ENV is "development",
    * so a production build renders nothing and loads nothing.
    */
   enabled?: boolean;
-  /** The server's shared key, when it was started with one. */
-  key?: string;
+  /** The backend's shared key, when it has one. (`key` itself is reserved by React.) */
+  apiKey?: string;
 }
-
-const DEFAULT_SERVER = "http://127.0.0.1:4711";
-const GLOBAL = "__devbar";
-const MARK = "data-devbar-loader";
 
 /** Whether <DevBar /> loads anything, for these props in this build. */
 export function shouldLoad(props: DevBarProps = {}): boolean {
@@ -27,29 +27,32 @@ export function shouldLoad(props: DevBarProps = {}): boolean {
   }
 }
 
-const reactMajor = Number.parseInt(version, 10) || 0;
+type Client = typeof import("@codalent/devbar/client");
+let client: Promise<Client> | null = null;
+
+/** The widget module, loaded once; it starts keeping console errors the moment it arrives. */
+function load(): Promise<Client> {
+  client ??= import("@codalent/devbar/client").then((m) => {
+    m.listen();
+    return m;
+  });
+  return client;
+}
 
 /**
- * Loads the toolbar from the local devbar server, once. Render it once in the root layout.
- * React 19 hoists the script into <head> (so it hears console errors from the start); on React 18
- * it is added after the first render.
+ * The toolbar. Render it once, in the root layout. The widget is a separate chunk your bundler
+ * loads only when it is on, so a production build carries none of it.
  */
-export function DevBar(props: DevBarProps): ReturnType<typeof createElement> | null {
+export function DevBar(props: DevBarProps): null {
   const on = shouldLoad(props);
-  const base = `${(props.server ?? DEFAULT_SERVER).replace(/\/+$/, "")}/devbar.js`;
-  const src = props.key ? `${base}?key=${encodeURIComponent(props.key)}` : base;
+  // Start loading during the first render rather than after it, to hear errors from hydration.
+  if (on && typeof window !== "undefined") void load();
+  const { server, apiKey } = props;
   useEffect(() => {
-    if (!on || reactMajor >= 19) return;
-    const w = window as unknown as Record<string, unknown>;
-    if (w[GLOBAL] || document.querySelector(`script[${MARK}]`)) return;
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.setAttribute(MARK, "");
-    document.head.appendChild(script);
-  }, [on, src]);
-  if (!on || reactMajor < 19) return null;
-  return createElement("script", { src, async: true, [MARK]: "" });
+    if (!on) return;
+    void load().then((m) => m.mount({ server, key: apiKey, enabled: true }));
+  }, [on, server, apiKey]);
+  return null;
 }
 
 export default DevBar;
