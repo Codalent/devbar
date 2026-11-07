@@ -2,8 +2,8 @@
 
 A small dev toolbar for any web app. A dot sits in the corner of your app; click it to log a
 **task, bug or idea** while you are looking at the problem, with a screenshot, the page, the
-browser, recent console errors and the element you point at. Each item becomes a **Markdown file**
-that you, your team and your AI coding agent can pick up.
+browser, recent console errors and the element you point at, or a **recording of your screen and voice** while you walk through what to fix.
+Each item becomes a **Markdown file** that you, your team and your AI coding agent can pick up.
 
 ![devbar in action: log a bug with a screenshot, the console error and the picked element, then drag it across the board](docs/demo.gif)
 
@@ -26,7 +26,7 @@ and devbar talks to that backend.
 - [Connect a backend](#connect-a-backend): [the local server](#1-the-local-server), [inside your Node server](#2-inside-your-own-node-server), [any other language](#3-your-own-backend-in-any-language)
 - [Using it](#using-it) · [The files](#the-files) · [Working with AI coding agents](#working-with-ai-coding-agents) · [Configuration](#configuration)
 - [The REST API](#the-rest-api) (for writing your own backend)
-- [Security](#security) · [Upgrading from 0.2](#upgrading-from-02)
+- [Security](#security) · [Upgrading from 0.3](#upgrading-from-03)
 
 ## Quick start: no backend
 
@@ -58,7 +58,7 @@ mount();
 `node_modules/@codalent/devbar/dist/devbar.js` into your static folder and load it from there:
 
 ```html
-<script src="https://unpkg.com/@codalent/devbar@0.3/dist/devbar.js"></script>
+<script src="https://unpkg.com/@codalent/devbar@0.4/dist/devbar.js"></script>
 ```
 
 That's all. Click the dot, fill in the form, press **Save**, and the browser downloads the item.
@@ -71,13 +71,15 @@ Without a screenshot, it is one Markdown file named after the type and title:
 bug-login-button-overlaps-logo.md
 ```
 
-With a screenshot, it is a zip with the same layout as the `.devbar/` folder, so the Markdown's
-image link works wherever you unzip it, and unzipping it into `.devbar/` puts it on the board later:
+With a screenshot or a screen recording, it is a zip with the same layout as the `.devbar/` folder,
+so the Markdown's links work wherever you unzip it, and unzipping it into `.devbar/` puts it on the
+board later:
 
 ```
 bug-login-button-overlaps-logo.zip
   open/bug-login-button-overlaps-logo.md
   assets/bug-login-button-overlaps-logo-screenshot.png
+  assets/bug-login-button-overlaps-logo-recording.webm     (when you recorded one)
 ```
 
 The Markdown is the same as a backend writes ([see The files](#the-files)), except that it has no `id`.
@@ -171,7 +173,8 @@ What `createDevbar` gives you:
 - `handle(req, res, next)` answers the [REST endpoints](#the-rest-api) relative to where you mount
   it, plus `/devbar.js`, and calls `next` for any other path.
 - It reads the request body itself, because an item with a screenshot is a few megabytes. A body that
-  a parser already read is used as it is.
+  a parser already read is used as it is. A screen recording arrives as raw video and can be hundreds
+  of megabytes, so keep JSON and body-size parsers off devbar's path.
 - It adds **no CORS headers and no access rules**: your server's own apply. A page on another origin
   needs that origin allowed, with the `Content-Type` and `X-Devbar-Key` headers.
 - Screenshots and the script are sent with `Cross-Origin-Resource-Policy: cross-origin`, so they load
@@ -193,11 +196,12 @@ endpoints: `GET /api/health`, `GET /api/items` (it can return an empty list) and
 
 - **The dot** sits bottom-right. Drag it anywhere; it snaps to the nearest edge (keeping its place
   along it) or, near a corner, to the corner, and remembers where you put it.
-- **With a backend**, clicking the dot unfolds two pills, **New task** and **Board**. The badge counts
-  items in **Open** and **In progress**. A grey dot means the backend can't be reached: hover it for
-  the hint. It reconnects by itself when the backend comes back and you return to the tab.
-- **Without a backend**, clicking the dot opens the form straight away, and the form's footer shows
-  the name of the file it will download.
+- **Click the dot** and pills unfold: **New task**, **Board** and **Record** with a backend; **New
+  task** and **Record** without one.
+- **With a backend**, the badge counts items in **Open** and **In progress**. A grey dot means the
+  backend can't be reached: hover it for the hint. It reconnects by itself when the backend comes
+  back and you return to the tab.
+- **Without a backend**, the form's footer shows the name of the file Save will download.
 - **The form** has a title, a Markdown description, a priority and a row of **Attach** switches. Each
   shows what it will attach:
 
@@ -211,13 +215,26 @@ endpoints: `GET /api/health`, `GET /api/items` (it can return an empty list) and
 
   Your last choice per type is remembered in the browser; `config.json` can change the defaults.
   **Cancel** writes nothing and drops what was collected.
+- **Record** asks which screen, window or tab to share, then your microphone, and starts recording
+  both. A bar at the bottom of the page shows the time, a level meter for your voice, and three
+  buttons: **Pause** (and **Resume**), **Stop**, and **Discard** (press it twice). A paused stretch is
+  left out of the video, so you can stop and think. Drag the bar anywhere by its edge. While it runs
+  the dot has a red ring. **Stop**, or the browser's own "Stop sharing" button, opens the form with
+  the video attached: its length, size, and a preview you can click to watch in a new tab. Give it a
+  title and save; Cancel asks once more before dropping the video. Leaving the page while a recording
+  runs or waits to be saved asks first, since the video exists only in the page until it is saved.
+  Without a microphone it records the screen with no sound and says so. It works in desktop Chrome,
+  Edge, Firefox and Safari on a secure page (`localhost` counts), not on phones; Chrome and Firefox
+  save WebM, Safari MP4.
 - **The board** (with a backend) has five columns. Drag a card to move it; click a card to read it,
   edit the Markdown, move it or delete it (delete asks twice). With the Node backend, edits you make
   in your editor show up on the board at once.
 
-Keyboard: `Esc` closes whatever is open. With the dot open, `N` opens a new item and `B` the board.
-`Ctrl/⌘ + Shift + .` opens and closes the board from anywhere (the form, without a backend), and
-`Ctrl/⌘ + Enter` saves the form.
+Keyboard: `Esc` closes whatever is open. With the dot open, `N` opens a new item, `B` the board and
+`R` starts a recording. `Ctrl/⌘ + Shift + .` opens and closes the board from anywhere (the form,
+without a backend), and `Ctrl/⌘ + Enter` saves the form. While recording, from anywhere in the page:
+`Alt/⌥ + Shift + P` pauses and resumes, `Alt/⌥ + Shift + S` stops; `Alt/⌥ + Shift + R` starts a
+recording.
 
 ## The files
 
@@ -231,7 +248,7 @@ The Node backend keeps items in a folder per status:
   in-progress/
   ready/          approved: ready to build
   closed/         done
-  assets/         screenshots
+  assets/         screenshots and screen recordings
 ```
 
 Each item is one file named `NNN-short-slug.md`. The three-digit id is unique across the five folders;
@@ -269,6 +286,21 @@ On an iPhone-sized window the Sign in button sits on top of the logo.
 ## Console errors at the time
 - Warning: Each child in a list should have a unique "key" prop. (Login.tsx:42)
 ```
+
+An item saved with a recording has two more fields, and a link to the video under the description:
+
+```markdown
+recording: assets/004-recording.webm
+recordingDuration: "2:31"
+---
+
+The three things to fix on the agents page, in order.
+
+[Screen recording, 2:31](../assets/004-recording.webm)
+```
+
+The board plays it above that link. A recording is about 15 MB a minute; if you would rather not
+commit them, add `.devbar/assets/*-recording.*` to `.gitignore`.
 
 Only the switches that were on produce a field and a section. The status is the folder, not a field.
 `screenshot` is relative to `.devbar/`. The image link in the body climbs one folder (`../assets/…`),
@@ -345,12 +377,13 @@ works without them and only loses the feature they provide.
 | `GET /api/health` | **yes** | the widget's "is the backend there?" check, and its settings |
 | `GET /api/items` | **yes** | the board's list and the dot's badge |
 | `POST /api/items` | **yes** | Save |
+| `PUT /api/items/:key/recording` | no | the video of an item saved with a screen recording |
 | `GET /api/items/:key` | **yes**, for the board | opening a card |
 | `PUT /api/items/:key` | no | editing a card's Markdown |
 | `POST /api/items/:key/move` | no | dragging a card to another column |
 | `DELETE /api/items/:key` | no | deleting a card |
 | `GET /api/events` | no | live updates; without it, the board refreshes when you open it and when you return to the tab |
-| `GET /assets/:name` | no | screenshots referenced as `assets/<name>`; not needed if you give absolute image URLs |
+| `GET /assets/:name` | no | screenshots and recordings referenced as `assets/<name>`; not needed if you give absolute URLs |
 
 `:key` is the item's `key`, URL-encoded.
 
@@ -414,6 +447,7 @@ The item object:
 | `path` | no | shown in the drawer and in toasts, e.g. a file path or an issue URL |
 | `page` | no | shown on the card |
 | `screenshot` | no | `assets/<name>`, which the board loads from `GET /assets/<name>`, or an absolute `https://` URL |
+| `recording` | no | a video, the same way; the card shows a video mark and the drawer plays it |
 | `frontMatter` | no | the item's front matter as an object; the board uses `elementRect` to outline the picked element |
 | `created`, `updated` | no | timestamps, shown as they are |
 
@@ -449,7 +483,8 @@ Save. The widget sends:
       "selector": "#login-form > button", "html": "<button class=\"sign-in\" type=\"submit\">Sign in</button>",
       "rect": { "x": 0.6512, "y": 0.0817, "w": 0.3077, "h": 0.0533 }
     },
-    "screenshot": "data:image/png;base64,iVBORw0KGgo…"
+    "screenshot": "data:image/png;base64,iVBORw0KGgo…",
+    "recording": { "mimeType": "video/webm", "duration": 151.4 }
   }
 }
 ```
@@ -459,11 +494,24 @@ Save. The widget sends:
 - `description` is Markdown and may be empty.
 - Each key in `context` is there only if its switch was on. `screenshot` is a PNG as a base64
   data URL. `element` is only sent for bugs. `rect` is the element's box as fractions of the window.
+- `recording` is only there when the item has a screen recording. It says what is coming: the
+  video's type and its length in seconds. The video itself follows in
+  [`PUT /api/items/:key/recording`](#put-apiitemskeyrecording-optional). A backend that doesn't take
+  recordings should answer `400` here, so the widget says so instead of losing the video.
 - Store it however you like. To produce the same Markdown file as devbar, follow the format in
   [The files](#the-files).
 
 Answer `201` (or `200`) with the new item: `{ "item": { "key": "001", "status": "open", "title": "…", "path": "…" } }`.
 The widget shows `path` in its "Saved" message, and then reloads the list.
+
+#### `PUT /api/items/:key/recording` (optional)
+
+Sent right after `POST /api/items` when the item has a screen recording. The body is the raw video,
+not JSON, with `Content-Type: video/webm` or `video/mp4` (Safari records MP4). It can be hundreds of
+megabytes, so stream it rather than reading it into memory; the Node backend accepts up to 2 GB.
+Store it, set the item's `recording` (for example `assets/001-recording.webm`), and answer
+`{ "item": { … } }`. If this fails, the widget deletes the item it just created (`DELETE`) and keeps
+the video in the form so you can try again.
 
 #### `PUT /api/items/:key`
 
@@ -477,7 +525,8 @@ item with it and answer `{ "item": { …, "markdown": "…" } }`. The Node backe
 
 #### `DELETE /api/items/:key`
 
-Delete the item. Answer `200` with any JSON body; the Node backend sends `{ "deleted": { … } }`.
+Delete the item. Answer `200` with any JSON body; the Node backend sends `{ "deleted": { … } }` and
+also deletes the screenshot and recording the item made.
 
 #### `GET /api/events` (optional)
 
@@ -492,9 +541,10 @@ If this endpoint doesn't exist, the browser logs the one failed request. The wid
 
 #### `GET /assets/:name` (optional)
 
-The image bytes, with their `Content-Type`. Images load with a plain `<img>` tag, so the key (if any)
-arrives as `?key=`, and a backend on another origin should send
-`Cross-Origin-Resource-Policy: cross-origin`.
+The file's bytes, with their `Content-Type` (`image/png`, `video/webm`, `video/mp4`, …). Images and
+videos load with plain `<img>` and `<video>` tags, so the key (if any) arrives as `?key=`, and a
+backend on another origin should send `Cross-Origin-Resource-Policy: cross-origin`. For videos,
+answer `Range` requests (`206 Partial Content`) so the player can seek.
 
 ### Checking a backend by hand
 
@@ -539,7 +589,7 @@ widget retries after 2, 4, 8, 16 and 32 seconds. After that it stops polling. It
 tab regains focus or becomes visible, or when you hover or click the dot. The browser itself logs each
 refused request and no script can silence that, so the retries are kept few.
 
-## Upgrading from 0.2
+## Upgrading from 0.3
 
 - **No `server` now means no backend.** `<DevBar />` and `mount()` used to default to
   `http://127.0.0.1:4711`. Now, without `server`, they download items. If you use the local server, add

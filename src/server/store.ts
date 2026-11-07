@@ -1,11 +1,13 @@
+import { createWriteStream } from "node:fs";
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import matter from "gray-matter";
 import { PRIORITIES, STATUSES, TYPES, type ItemType, type Priority, type Status } from "../name.js";
 import type { Config } from "./config.js";
 import { buildMarkdown, localTimestamp, oneLine, slugify, yamlScalar, type CreateInput } from "../item.js";
 
-export { localTimestamp, slugify, yamlScalar, type CreateInput } from "../item.js";
+export { formatDuration, localTimestamp, slugify, yamlScalar, type CreateInput } from "../item.js";
 
 export class StoreError extends Error {
   constructor(
@@ -34,6 +36,8 @@ export interface Item {
   page: string | null;
   /** Relative to the data folder, as the front matter has it: `assets/001-screenshot.png`. */
   screenshot: string | null;
+  /** A screen recording, the same way: `assets/001-recording.webm`. */
+  recording: string | null;
   hasFrontMatter: boolean;
   frontMatter: Record<string, unknown>;
 }
@@ -54,6 +58,15 @@ const MD = /\.md$/i;
 const ID_PREFIX = /^(\d+)(?:-|\.md$)/;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
+const MAX_RECORDING_BYTES = 2 * 1024 * 1024 * 1024;
+/** The video types a browser's MediaRecorder writes, and the extension each is stored with. */
+const RECORDING_TYPES: Record<string, "webm" | "mp4"> = { "video/webm": "webm", "video/mp4": "mp4" };
+
+export function recordingExtension(mimeType: unknown): "webm" | "mp4" | null {
+  const base = String(mimeType ?? "").split(";")[0].trim().toLowerCase();
+  return RECORDING_TYPES[base] ?? null;
+}
+
 
 /** Keeps `candidate` inside `base`, or throws: nothing outside the data folder is ever touched. */
 export function inside(base: string, ...segments: string[]): string {
@@ -147,6 +160,7 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
       updated: asString(data.updated),
       page: asString(data.page),
       screenshot: asString(data.screenshot),
+      recording: asString(data.recording),
       hasFrontMatter,
       frontMatter: jsonSafe(data) as Record<string, unknown>,
       markdown: raw,
@@ -229,6 +243,10 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
     const status = (input.status ?? "open") as Status;
     if (!STATUSES.includes(status)) throw new StoreError(400, "BAD_STATUS", `status must be one of ${STATUSES.join(", ")}.`);
     const screenshot = input.context?.screenshot ? decodeScreenshot(input.context.screenshot) : null;
+    const recordingExt = input.context?.recording ? recordingExtension(input.context.recording.mimeType) : null;
+    if (input.context?.recording && !recordingExt) {
+      throw new StoreError(400, "BAD_RECORDING", "A recording must be video/webm or video/mp4.");
+    }
 
     return serialize(async () => {
       await ensureFolders();
@@ -243,7 +261,9 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
         await writeFile(screenshotPath, screenshot, { flag: "wx" });
         screenshotRel = `${getConfig().folders.assets}/${name}`;
       }
-      const markdown = buildMarkdown({ ...input, title, type, priority }, { id, screenshot: screenshotRel, now: localTimestamp() });
+      // The recording's name is set now and written to the file; the video itself follows.
+      const recordingRel = recordingExt ? `${getConfig().folders.assets}/${id}-recording.${recordingExt}` : null;
+      const markdown = buildMarkdown({ ...input, title, type, priority }, { id, screenshot: screenshotRel, recording: recordingRel, now: localTimestamp() });
       try {
         await writeFile(target, markdown, { flag: "wx" });
       } catch (error) {
@@ -323,8 +343,51 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
       if (item.id && shot === `${assets}/${item.id}-screenshot.png`) {
         await unlink(inside(assetsDir(), `${item.id}-screenshot.png`)).catch(() => undefined);
       }
+      const own = ownRecording(item);
+      if (own) await unlink(inside(assetsDir(), own)).catch(() => undefined);
       return strip(item);
     });
+  }
+
+  /** The recording file this item made (`007-recording.webm`), or null for any other path. */
+  function ownRecording(item: Item): string | null {
+    const assets = getConfig().folders.assets;
+    for (const ext of Object.values(RECORDING_TYPES)) {
+      const name = `${item.id}-recording.${ext}`;
+      if (item.id && item.recording === `${assets}/${name}`) return name;
+    }
+    return null;
+  }
+
+  /**
+   * Writes the video for an item whose front matter already names its recording. The body is
+   * streamed to a hidden file and renamed into place, so a broken upload leaves nothing behind.
+   */
+  async function writeRecording(key: string, mimeType: string | undefined, body: AsyncIterable<Buffer> | Buffer): Promise<ItemWithBody> {
+    const item = await find(key);
+    const name = ownRecording(item);
+    if (!name) throw new StoreError(409, "NO_RECORDING", `Item ${key} does not expect a recording.`);
+    const ext = recordingExtension(mimeType);
+    if (!ext || !name.endsWith(`.${ext}`)) throw new StoreError(415, "BAD_RECORDING", `Send the recording as video/${name.split(".").pop()}.`);
+    const target = inside(assetsDir(), name);
+    const temp = inside(assetsDir(), `.${name}.part`);
+    let size = 0;
+    try {
+      async function* limited() {
+        for await (const chunk of Buffer.isBuffer(body) ? [body] : body) {
+          size += chunk.length;
+          if (size > MAX_RECORDING_BYTES) throw new StoreError(413, "RECORDING_TOO_LARGE", "The recording is larger than 2 GB.");
+          yield chunk;
+        }
+      }
+      await pipeline(limited(), createWriteStream(temp));
+      if (!size) throw new StoreError(400, "EMPTY_RECORDING", "The recording is empty.");
+      await rename(temp, target);
+    } catch (error) {
+      await unlink(temp).catch(() => undefined);
+      throw error;
+    }
+    return item;
   }
 
   async function assetFile(name: string): Promise<string> {
@@ -350,6 +413,7 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
     update,
     move,
     remove,
+    writeRecording,
     assetFile,
     counts,
     nextId,

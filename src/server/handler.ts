@@ -43,6 +43,14 @@ export interface Devbar {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const ASSET_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".webm": "video/webm",
+  ".mp4": "video/mp4",
+};
 const MAX_BODY = 25 * 1024 * 1024;
 
 export async function readVersion(): Promise<string> {
@@ -257,6 +265,13 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
         log(`  → ${item.path}`);
         return send(res, 200, { item });
       }
+      case "PUT /api/items/:id/recording": {
+        const parsed = (req as IncomingMessage & { body?: unknown }).body;
+        const body = req.readableEnded && Buffer.isBuffer(parsed) ? parsed : (req as AsyncIterable<Buffer>);
+        const item = await store.writeRecording(parts[2], req.headers["content-type"], body);
+        log(`  ▶ ${item.recording} for ${item.path}`);
+        return send(res, 200, { item });
+      }
       case "DELETE /api/items/:id": {
         const item = await store.remove(parts[2]);
         log(`  - ${item.path}`);
@@ -276,8 +291,23 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
       }
       case "GET /assets/:name": {
         const file = await store.assetFile(parts[1]);
-        const type = /\.png$/i.test(file) ? "image/png" : /\.jpe?g$/i.test(file) ? "image/jpeg" : /\.webp$/i.test(file) ? "image/webp" : "application/octet-stream";
-        res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", ...embeddable });
+        const type = ASSET_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+        const headers = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", "Accept-Ranges": "bytes", ...embeddable };
+        // Ranges, so a video player can seek in a recording without loading all of it.
+        const { size } = await stat(file);
+        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+        if (range && (range[1] || range[2])) {
+          const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start >= size || start > end) {
+            res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` });
+            return void res.end();
+          }
+          res.writeHead(206, { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) });
+          createReadStream(file, { start, end }).pipe(res);
+          return;
+        }
+        res.writeHead(200, { ...headers, "Content-Length": String(size) });
         createReadStream(file).pipe(res);
         return;
       }

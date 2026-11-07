@@ -25,6 +25,8 @@ export interface CreateInput {
       rect?: { x: number; y: number; w: number; h: number };
     };
     screenshot?: string;
+    /** A recording to come: the file itself follows with `PUT /api/items/:id/recording`. */
+    recording?: { mimeType?: string; duration?: number };
   };
 }
 
@@ -89,11 +91,22 @@ export function oneLine(text: unknown, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+/** 151 seconds as 2:31, an hour or more as 1:02:31. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
 export interface MarkdownOptions {
   /** The three-digit id; left out of the front matter when null (a downloaded item has none). */
   id: string | null;
   /** The screenshot's path relative to the data folder, e.g. `assets/001-screenshot.png`. */
   screenshot: string | null;
+  /** The recording's path the same way, e.g. `assets/001-recording.webm`. */
+  recording?: string | null;
   /** The `created` and `updated` timestamp. */
   now: string;
 }
@@ -118,6 +131,11 @@ export function buildMarkdown(input: CreateInput, o: MarkdownOptions): string {
     if (typeof ctx.browser.touch === "boolean") fm.push(["touch", ctx.browser.touch]);
   }
   if (o.screenshot) fm.push(["screenshot", o.screenshot]);
+  const duration = Number(ctx.recording?.duration);
+  if (o.recording) {
+    fm.push(["recording", o.recording]);
+    if (Number.isFinite(duration) && duration > 0) fm.push(["recordingDuration", formatDuration(duration)]);
+  }
   const el = ctx.element;
   if (el && el.selector) {
     const tag = oneLine(el.tag || "element", 40).toLowerCase();
@@ -135,6 +153,10 @@ export function buildMarkdown(input: CreateInput, o: MarkdownOptions): string {
   const parts: string[] = [];
   const description = String(input.description ?? "").replace(/\r\n/g, "\n").trim();
   if (description) parts.push(description);
+  if (o.recording) {
+    const length = Number.isFinite(duration) && duration > 0 ? `, ${formatDuration(duration)}` : "";
+    parts.push(`[Screen recording${length}](../${o.recording})`);
+  }
   // Items sit one folder below the data folder, so the image link climbs one level: it then
   // shows on GitHub and in an editor's preview from whichever status folder the file is in.
   if (o.screenshot) parts.push(`![Screenshot](../${o.screenshot})`);

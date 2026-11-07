@@ -28,6 +28,7 @@ import {
 } from "./context.js";
 import { buildMarkdown, localTimestamp, slugify, type CreateInput } from "../item.js";
 import { esc, renderMarkdown } from "./markdown.js";
+import { recordingUnsupported, releaseRecording, ScreenRecorder, type Recording } from "./recorder.js";
 import { CSS } from "./styles.js";
 import { dataUrlBytes, zip } from "./zip.js";
 
@@ -45,6 +46,7 @@ interface Item {
   priority: Priority;
   page: string | null;
   screenshot: string | null;
+  recording: string | null;
   created: string | null;
   hasFrontMatter: boolean;
   frontMatter: Record<string, unknown>;
@@ -68,6 +70,12 @@ const TYPE_COLOR: Record<ItemType, string> = { bug: "var(--bug)", task: "var(--t
 
 const ICON_PLUS = `<svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 const ICON_PEN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
+const ICON_REC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.6" fill="var(--bug)" stroke="none"/></svg>`;
+const ICON_PAUSE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>`;
+const ICON_PLAY = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6Z"/></svg>`;
+const ICON_STOP = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+const ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`;
+const ICON_MIC_OFF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.9-.7M19 11a7 7 0 0 1-1.1 3.8M5 11a7 7 0 0 0 11.4 5.4M12 18v3"/></svg>`;
 const ICON_BOARD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.2"/><rect x="9.5" y="4" width="5" height="11" rx="1.2"/><rect x="16" y="4" width="5" height="7" rx="1.2"/></svg>`;
 
 const TEMPLATE = `
@@ -77,6 +85,18 @@ const TEMPLATE = `
   <div class="pills h rev">
     <button class="pill glass" data-act="new">${ICON_PEN}New task<kbd>N</kbd></button>
     <button class="pill glass" data-act="board">${ICON_BOARD}Board<kbd>B</kbd></button>
+    <button class="pill glass" data-act="record">${ICON_REC}Record<kbd>R</kbd></button>
+  </div>
+
+  <div class="recbar glass" role="toolbar" aria-label="Screen recording" hidden>
+    <span class="recdot" aria-hidden="true"></span>
+    <span class="reclabel">Rec</span>
+    <span class="rectime" role="timer">0:00</span>
+    <span class="meter" title="Your microphone"><i></i><i></i><i></i><i></i><i></i></span>
+    <span class="nomic" title="No microphone: the video has no sound" hidden>${ICON_MIC_OFF}</span>
+    <button class="rb pause" data-act="rec-pause" title="Pause (Alt+Shift+P)">${ICON_PAUSE}<span>Pause</span></button>
+    <button class="rb stop" data-act="rec-stop" title="Stop and attach to a new item (Alt+Shift+S)">${ICON_STOP}<span>Stop</span></button>
+    <button class="rb discard" data-act="rec-discard" title="Discard the recording" aria-label="Discard the recording">${ICON_TRASH}</button>
   </div>
 
   <div class="form glass" role="dialog" aria-label="New item">
@@ -100,6 +120,7 @@ const TEMPLATE = `
       </div>
       <div class="attach">
         <h4>Attach</h4>
+        <div class="tog rec" data-k="recording" hidden><button class="sw" role="switch" aria-checked="true" aria-label="Screen recording"></button><div><div class="t">Screen recording</div><div class="d"></div></div><a class="vthumb" target="_blank" rel="noopener" title="Watch it in a new tab"></a></div>
         <div class="tog" data-k="screenshot"><button class="sw" role="switch" aria-checked="false" aria-label="Screenshot"></button><div><div class="t">Screenshot</div><div class="d"></div></div><div class="thumb" aria-hidden="true"></div></div>
         <div class="tog" data-k="page"><button class="sw" role="switch" aria-checked="false" aria-label="Page"></button><div><div class="t">Page</div><div class="d"></div></div><div></div></div>
         <div class="tog" data-k="browser"><button class="sw" role="switch" aria-checked="false" aria-label="Browser and window"></button><div><div class="t">Browser and window</div><div class="d"></div></div><div></div></div>
@@ -155,6 +176,35 @@ function store<T>(key: string, value?: T): T | null {
   return null;
 }
 
+/** 151000 ms as 2:31. */
+function clock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60));
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm.padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+}
+
+function fileSize(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Chrome writes WebM without a duration, so its player shows no length and cannot seek. Seeking
+ * far past the end once makes it read the whole length; then it goes back to the start.
+ */
+function knowDuration(video: HTMLVideoElement) {
+  video.addEventListener("loadedmetadata", () => {
+    if (video.duration !== Infinity) return;
+    video.addEventListener("durationchange", function back() {
+      if (video.duration === Infinity) return;
+      video.removeEventListener("durationchange", back);
+      video.currentTime = 0;
+    });
+    video.currentTime = 1e101;
+  });
+}
+
 /** A host element the page's CSS cannot move, hide or restyle. */
 const HOST_STYLE = [
   "all:initial",
@@ -208,6 +258,7 @@ function normalizeItem(input: Record<string, unknown>): FullItem {
     priority: PRIORITIES.includes(raw.priority as Priority) ? (raw.priority as Priority) : "normal",
     page: raw.page ?? null,
     screenshot: raw.screenshot ?? (typeof fm.screenshot === "string" ? fm.screenshot : null),
+    recording: raw.recording ?? (typeof fm.recording === "string" ? fm.recording : null),
     created: raw.created ?? null,
     hasFrontMatter: raw.hasFrontMatter ?? /^---\r?\n/.test(markdown),
     frontMatter: fm,
@@ -271,6 +322,15 @@ export class Toolbar {
   private deleteArmed: ReturnType<typeof setTimeout> | undefined;
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
   private observer: MutationObserver | null = null;
+
+  private readonly recorder = new ScreenRecorder();
+  /** A finished recording waiting in the form, until it is saved or discarded. */
+  private recording: Recording | null = null;
+  private attachRecording = true;
+  private recTimer: ReturnType<typeof setInterval> | undefined;
+  private discardArmed: ReturnType<typeof setTimeout> | undefined;
+  private cancelArmed: ReturnType<typeof setTimeout> | undefined;
+  private recDrag: { dx: number; dy: number } | null = null;
   private readonly cleanups: Array<() => void> = [];
 
   /** The backend has no event stream (or it keeps failing): refresh when the tab comes back instead. */
@@ -290,6 +350,7 @@ export class Toolbar {
     }
     this.restorePosition();
     this.bind();
+    this.recorder.onStop = (recording) => this.recordingStopped(recording);
   }
 
   /** No backend configured: items are downloaded, there is no board. */
@@ -313,13 +374,18 @@ export class Toolbar {
     this.placeDot();
     this.renderToggles();
     if (this.local) {
-      // Nothing to connect to: the form works, Save downloads.
+      // Nothing to connect to: the form and recording work, Save downloads, there is no board.
       this.connected = true;
-      this.$(".dot").setAttribute("aria-label", `${NAME}: new item (saved as a download)`);
+      this.$(".dot").setAttribute("aria-label", `${NAME} (saves as downloads)`);
+      this.$("[data-act=board]").style.display = "none";
     } else void this.connect();
   }
 
   destroy(): void {
+    this.recorder.discard();
+    clearInterval(this.recTimer);
+    releaseRecording(this.recording);
+    this.recording = null;
     this.observer?.disconnect();
     this.events?.close();
     clearTimeout(this.retryTimer);
@@ -703,8 +769,6 @@ export class Toolbar {
       }
       if (this.formOpen) return this.hideForm();
       if (this.boardOpen) return this.closeBoard();
-      // Without a backend there is no board, so the one thing to do is a new item.
-      if (this.local) return this.openForm("task");
       this.setOpen(!this.open);
     });
     dot.addEventListener("mouseenter", () => {
@@ -724,10 +788,18 @@ export class Toolbar {
           return this.openForm("task");
         case "board":
           return this.openBoard();
+        case "record":
+          return void this.startRecording();
+        case "rec-pause":
+          return this.togglePause();
+        case "rec-stop":
+          return this.recorder.stop();
+        case "rec-discard":
+          return this.discardRecording(target);
         case "hide-form":
           return this.hideForm();
         case "cancel":
-          return this.cancelForm();
+          return this.cancelForm(target);
         case "save":
           return void this.save();
         case "pick":
@@ -760,6 +832,10 @@ export class Toolbar {
     );
     this.$$<HTMLButtonElement>(".tog .sw").forEach((sw) =>
       sw.addEventListener("click", () => {
+        if (sw.closest<HTMLElement>(".tog")!.dataset.k === "recording") {
+          this.attachRecording = !this.attachRecording;
+          return this.renderToggles();
+        }
         const key = sw.closest<HTMLElement>(".tog")!.dataset.k as ContextKey;
         if (key === "element" && this.type !== "bug") return;
         const toggles = this.toggles(this.type);
@@ -782,6 +858,29 @@ export class Toolbar {
         this.renderBoard();
       }),
     );
+
+    // the recording bar: drag it by anything that is not a button
+    const bar = this.$(".recbar");
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || (e.target as Element).closest("button")) return;
+      const r = bar.getBoundingClientRect();
+      this.recDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      bar.setPointerCapture(e.pointerId);
+      bar.classList.add("dragging");
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!this.recDrag) return;
+      const r = bar.getBoundingClientRect();
+      const x = Math.min(Math.max(8, e.clientX - this.recDrag.dx), this.W() - r.width - 8);
+      const y = Math.min(Math.max(8, e.clientY - this.recDrag.dy), this.H() - r.height - 8);
+      Object.assign(bar.style, { left: `${x}px`, top: `${y}px`, bottom: "auto", transform: "none" });
+    });
+    const endBarDrag = () => {
+      this.recDrag = null;
+      bar.classList.remove("dragging");
+    };
+    bar.addEventListener("pointerup", endBarDrag);
+    bar.addEventListener("pointercancel", endBarDrag);
 
     // element picker
     const veil = this.$(".veil");
@@ -812,6 +911,12 @@ export class Toolbar {
       this.retrySoon();
       this.catchUp();
     });
+    // Leaving the page would lose a recording that is running or not yet saved.
+    this.listen<BeforeUnloadEvent>(window, "beforeunload", (e) => {
+      if (this.recorder.state === "idle" && !this.recording) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
   }
 
   private onKey(e: KeyboardEvent) {
@@ -819,6 +924,18 @@ export class Toolbar {
     const target = path[0] as HTMLElement | undefined;
     const typing = !!target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable);
     const inside = path.includes(this.host);
+    // Recording: Alt+Shift+R starts, Alt+Shift+P pauses and resumes, Alt+Shift+S stops. They work
+    // while typing too (keys by position, since Alt changes the character on macOS).
+    if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && /^Key[RPS]$/.test(e.code)) {
+      const active = this.recorder.state === "recording" || this.recorder.state === "paused";
+      if (e.code === "KeyR" && this.recorder.state === "idle") void this.startRecording();
+      else if (e.code === "KeyP" && active) this.togglePause();
+      else if (e.code === "KeyS" && active) this.recorder.stop();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.key === "Escape") {
       if (this.picking) this.endPick();
       else if (this.editing && this.drawer) {
@@ -856,6 +973,9 @@ export class Toolbar {
       } else if (k === "b") {
         e.preventDefault();
         this.openBoard();
+      } else if (k === "r") {
+        e.preventDefault();
+        void this.startRecording();
       }
     }
   }
@@ -883,7 +1003,7 @@ export class Toolbar {
   }
 
   private hasDraft(): boolean {
-    return !!(this.$<HTMLInputElement>("input[name=title]").value.trim() || this.$<HTMLTextAreaElement>("textarea[name=desc]").value.trim() || this.picked);
+    return !!(this.$<HTMLInputElement>("input[name=title]").value.trim() || this.$<HTMLTextAreaElement>("textarea[name=desc]").value.trim() || this.picked || this.recording);
   }
 
   private setType(type: ItemType) {
@@ -927,9 +1047,25 @@ export class Toolbar {
     this.$(".form").classList.remove("show");
     this.shotRun++;
     this.shot = { state: "idle" };
+    this.disarmCancel();
   }
 
-  private cancelForm() {
+  private disarmCancel() {
+    clearTimeout(this.cancelArmed);
+    const button = this.$("[data-act=cancel]");
+    button.classList.remove("armed");
+    button.textContent = "Cancel";
+  }
+
+  private cancelForm(button?: HTMLElement) {
+    // A recording is minutes of work: Cancel asks once more before dropping it.
+    if (this.recording && button && !button.classList.contains("armed")) {
+      button.classList.add("armed");
+      button.textContent = "Discard the video?";
+      clearTimeout(this.cancelArmed);
+      this.cancelArmed = setTimeout(() => this.disarmCancel(), 4000);
+      return;
+    }
     this.hideForm();
     this.resetDraft();
     this.toast("Discarded. Nothing was written.");
@@ -939,6 +1075,9 @@ export class Toolbar {
     this.$<HTMLInputElement>("input[name=title]").value = "";
     this.$<HTMLTextAreaElement>("textarea[name=desc]").value = "";
     this.picked = null;
+    releaseRecording(this.recording);
+    this.recording = null;
+    this.attachRecording = true;
     this.priority = "normal";
     this.$$(".prio button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.p === "normal")));
     this.updatePath();
@@ -1007,7 +1146,7 @@ export class Toolbar {
     const el = this.$(".form footer .path");
     if (this.local) {
       el.textContent = `↓ ${this.downloadBase(slug)}${this.willZip() ? ".zip" : ".md"}`;
-      el.title = this.willZip() ? "Downloads a zip: the Markdown file and its screenshot" : "Downloads the Markdown file";
+      el.title = this.willZip() ? "Downloads a zip: the Markdown file with its screenshot or recording" : "Downloads the Markdown file";
     } else if (this.config?.dir) {
       el.textContent = `→ ${this.config.dir}/${this.config.folders.open}/${this.nextId()}-${slug}.md`;
     } else {
@@ -1022,12 +1161,16 @@ export class Toolbar {
 
   /** The download is a zip when it has a file to go with the Markdown. */
   private willZip(): boolean {
-    return this.toggles(this.type).screenshot && this.shot.state !== "error";
+    return (this.toggles(this.type).screenshot && this.shot.state !== "error") || !!(this.recording && this.attachRecording);
   }
 
   private renderToggles() {
     const toggles = this.toggles(this.type);
     for (const row of this.$$(".tog")) {
+      if (row.dataset.k === "recording") {
+        this.renderRecordingRow(row);
+        continue;
+      }
       const key = row.dataset.k as ContextKey;
       const sw = row.querySelector<HTMLButtonElement>(".sw")!;
       const disabled = key === "element" && this.type !== "bug";
@@ -1069,6 +1212,19 @@ export class Toolbar {
     this.updatePath();
   }
 
+  private renderRecordingRow(row: HTMLElement) {
+    const rec = this.recording;
+    row.hidden = !rec;
+    if (!rec) return;
+    row.querySelector(".sw")!.setAttribute("aria-checked", String(this.attachRecording));
+    row.querySelector(".d")!.textContent = `${clock(rec.duration * 1000)} · ${fileSize(rec.blob.size)} · ${rec.voice ? "with your voice" : "no sound"}`;
+    const thumb = row.querySelector<HTMLAnchorElement>(".vthumb")!;
+    if (thumb.getAttribute("href") !== rec.url) {
+      thumb.href = rec.url;
+      thumb.innerHTML = `<video muted playsinline preload="auto" src="${esc(rec.url)}"></video><span class="play">${ICON_PLAY}</span>`;
+    }
+  }
+
   private boxHtml(rect?: { x: number; y: number; w: number; h: number } | null): string {
     if (!rect) return "";
     return `<span class="box" style="left:${rect.x * 100}%;top:${rect.y * 100}%;width:${rect.w * 100}%;height:${rect.h * 100}%"></span>`;
@@ -1105,18 +1261,31 @@ export class Toolbar {
       }
       if (t.console) context.console = consoleEntries().map(({ level, message, source }) => ({ level, message, source }));
       if (this.type === "bug" && t.element && this.picked) context.element = this.picked;
+      const video = this.recording && this.attachRecording ? this.recording : null;
+      if (video) context.recording = { mimeType: video.mimeType, duration: video.duration };
       const input: CreateInput = { type: this.type, title, description: this.$<HTMLTextAreaElement>("textarea[name=desc]").value, priority: this.priority, context };
       if (this.local) {
-        const name = this.download(input);
+        const name = await this.download(input, video);
         this.hideForm();
         this.resetDraft();
         this.toast(noShot ? "Downloaded without a screenshot" : "Downloaded", name, noShot);
         return;
       }
-      const { item } = await this.api<{ item: Record<string, unknown> }>("/api/items", { method: "POST", json: input });
+      const { item: raw } = await this.api<{ item: Record<string, unknown> }>("/api/items", { method: "POST", json: input });
+      const item = normalizeItem(raw ?? {});
+      if (video) {
+        button.textContent = "Uploading video…";
+        try {
+          await this.uploadRecording(item.key, video);
+        } catch (error) {
+          // No item that points at a video that is not there; the form keeps the recording to retry.
+          await this.api(`/api/items/${encodeURIComponent(item.key)}`, { method: "DELETE" }).catch(() => undefined);
+          throw new Error(`the video did not upload (${(error as Error).message})`);
+        }
+      }
       this.hideForm();
       this.resetDraft();
-      this.toast(noShot ? "Saved without a screenshot" : "Saved", item ? normalizeItem(item).path : undefined, noShot);
+      this.toast(noShot ? "Saved without a screenshot" : video ? `Saved with a ${clock(video.duration * 1000)} recording` : "Saved", item.path, noShot);
       await this.refresh();
     } catch (error) {
       this.toast(`Not saved: ${(error as Error).message}`, undefined, true);
@@ -1129,27 +1298,149 @@ export class Toolbar {
 
   /**
    * No backend: the item as the Markdown file a backend would write, downloaded. With a screenshot
-   * it is a zip laid out like the data folder (`open/…md` and `assets/…png`), so the image link
-   * works wherever it is unzipped, and unzipping it into `.devbar/` puts it on the board.
+   * or a recording it is a zip laid out like the data folder (`open/…md` and `assets/…`), so the
+   * links work wherever it is unzipped, and unzipping it into `.devbar/` puts it on the board.
    */
-  private download(input: CreateInput): string {
+  private async download(input: CreateInput, video: Recording | null): Promise<string> {
     const base = this.downloadBase(slugify(input.title ?? ""));
     const shot = input.context?.screenshot;
     const now = localTimestamp();
-    if (!shot) {
+    if (!shot && !video) {
       const markdown = buildMarkdown(input, { id: null, screenshot: null, now });
       downloadBlob(this.root, `${base}.md`, new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
       return `${base}.md`;
     }
     const assets = DEFAULT_CONFIG.assets;
-    const screenshot = `${assets}/${base}-screenshot.png`;
-    const markdown = buildMarkdown(input, { id: null, screenshot, now });
-    const archive = zip([
-      { name: `${DEFAULT_CONFIG.folders.open}/${base}.md`, data: new TextEncoder().encode(markdown) },
-      { name: screenshot, data: dataUrlBytes(shot) },
-    ]);
+    const screenshot = shot ? `${assets}/${base}-screenshot.png` : null;
+    const ext = video && /mp4/i.test(video.mimeType) ? "mp4" : "webm";
+    const recording = video ? `${assets}/${base}-recording.${ext}` : null;
+    const markdown = buildMarkdown(input, { id: null, screenshot, recording, now });
+    const entries: { name: string; data: Uint8Array }[] = [{ name: `${DEFAULT_CONFIG.folders.open}/${base}.md`, data: new TextEncoder().encode(markdown) }];
+    if (shot && screenshot) entries.push({ name: screenshot, data: dataUrlBytes(shot) });
+    if (video && recording) entries.push({ name: recording, data: new Uint8Array(await video.blob.arrayBuffer()) });
+    const archive = zip(entries);
     downloadBlob(this.root, `${base}.zip`, archive);
     return `${base}.zip`;
+  }
+
+  private async uploadRecording(key: string, video: Recording): Promise<void> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.server}/api/items/${encodeURIComponent(key)}/recording`, {
+        method: "PUT",
+        headers: { ...this.keyHeader(), "Content-Type": video.mimeType },
+        body: video.blob,
+      });
+    } catch {
+      throw new Error(this.offline);
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      throw new Error(body.error?.message || `${res.status} ${res.statusText}`);
+    }
+  }
+
+  // ------------------------------------------------------------------ screen recording
+
+  private async startRecording() {
+    if (this.recorder.state !== "idle") return;
+    if (!this.connected) {
+      this.toast(this.offline, undefined, true);
+      this.retrySoon();
+      return;
+    }
+    const why = recordingUnsupported();
+    if (why) return this.toast(why, undefined, true);
+    if (this.recording) {
+      this.openForm("task");
+      return this.toast("Save or discard the last recording first.", undefined, true);
+    }
+    this.setOpen(false);
+    if (this.formOpen) this.hideForm();
+    if (this.boardOpen) this.closeBoard();
+    let result: { voice: boolean; micError?: string };
+    try {
+      // Called straight from the click or key press: the screen picker needs one.
+      result = await this.recorder.start();
+    } catch (error) {
+      const name = (error as DOMException)?.name;
+      if (name === "NotAllowedError" || name === "AbortError") this.toast("Recording not started.");
+      else this.toast(`Could not record: ${(error as Error).message}`, undefined, true);
+      return;
+    }
+    this.showRecbar(result.voice);
+    if (result.micError) this.toast(`Recording without sound: ${result.micError}`, undefined, true);
+    else this.toast("Recording. Talk through the fixes; pause any time.");
+  }
+
+  private togglePause() {
+    if (this.recorder.state === "recording") this.recorder.pause();
+    else if (this.recorder.state === "paused") this.recorder.resume();
+    this.updateRecbar();
+  }
+
+  private discardRecording(button: HTMLElement) {
+    if (!button.classList.contains("armed")) {
+      button.classList.add("armed");
+      button.title = "Click again to discard";
+      clearTimeout(this.discardArmed);
+      this.discardArmed = setTimeout(() => {
+        button.classList.remove("armed");
+        button.title = "Discard the recording";
+      }, 3000);
+      return;
+    }
+    clearTimeout(this.discardArmed);
+    button.classList.remove("armed");
+    this.recorder.discard();
+  }
+
+  private recordingStopped(recording: Recording | null) {
+    this.hideRecbar();
+    if (!recording) return this.toast("Recording discarded. Nothing was written.");
+    releaseRecording(this.recording);
+    this.recording = recording;
+    this.attachRecording = true;
+    if (this.connected) this.openForm("task");
+    else this.toast("Recording kept. Start the server, then press New task to save it.", undefined, true);
+  }
+
+  private showRecbar(voice: boolean) {
+    const bar = this.$(".recbar");
+    bar.hidden = false;
+    this.$(".recbar .meter").hidden = !voice;
+    this.$(".recbar .nomic").hidden = voice;
+    this.$(".root").classList.add("recording");
+    this.$(".dot").classList.add("rec");
+    clearInterval(this.recTimer);
+    this.recTimer = setInterval(() => this.updateRecbar(), 100);
+    this.updateRecbar();
+  }
+
+  private hideRecbar() {
+    clearInterval(this.recTimer);
+    this.recTimer = undefined;
+    this.$(".recbar").hidden = true;
+    this.$(".root").classList.remove("recording");
+    this.$(".dot").classList.remove("rec");
+  }
+
+  private updateRecbar() {
+    const paused = this.recorder.state === "paused";
+    const bar = this.$(".recbar");
+    bar.classList.toggle("paused", paused);
+    this.$(".recbar .reclabel").textContent = paused ? "Paused" : "Rec";
+    this.$(".recbar .rectime").textContent = clock(this.recorder.elapsed());
+    const pause = this.$(".recbar .pause");
+    if (pause.classList.contains("on") !== paused) {
+      pause.classList.toggle("on", paused);
+      pause.innerHTML = paused ? `${ICON_PLAY}<span>Resume</span>` : `${ICON_PAUSE}<span>Pause</span>`;
+      pause.title = paused ? "Resume (Alt+Shift+P)" : "Pause (Alt+Shift+P)";
+    }
+    const level = this.recorder.level();
+    this.$$(".recbar .meter i").forEach((bar, i) => {
+      bar.style.height = `${3 + level * [0.45, 0.75, 1, 0.75, 0.45][i] * 13}px`;
+    });
   }
 
   // ------------------------------------------------------------------ element picker
@@ -1252,7 +1543,7 @@ export class Toolbar {
         card.tabIndex = 0;
         card.dataset.key = it.key;
         card.style.setProperty("--tc", TYPE_COLOR[it.type]);
-        card.innerHTML = `<div class="top"><span class="type"><i></i>${it.type}</span><span class="id">${it.id ? `#${esc(it.id)}` : esc(it.key)}</span></div><div class="title">${esc(it.title)}</div><div class="meta">${it.screenshot ? '<span class="shot" title="Has a screenshot"></span>' : ""}<span class="pg">${esc(it.page ?? "")}</span><span class="pr ${it.priority}">${it.priority}</span></div>`;
+        card.innerHTML = `<div class="top"><span class="type"><i></i>${it.type}</span><span class="id">${it.id ? `#${esc(it.id)}` : esc(it.key)}</span></div><div class="title">${esc(it.title)}</div><div class="meta">${it.recording ? '<span class="vid" title="Has a screen recording"></span>' : ""}${it.screenshot ? '<span class="shot" title="Has a screenshot"></span>' : ""}<span class="pg">${esc(it.page ?? "")}</span><span class="pr ${it.priority}">${it.priority}</span></div>`;
         card.addEventListener("click", () => void this.openDrawer(it.key));
         card.addEventListener("keydown", (e) => {
           if (e.key === "Enter") void this.openDrawer(it.key);
@@ -1352,8 +1643,24 @@ export class Toolbar {
             .join("\n")}\n---</pre>`
         : "";
       const shotUrl = item.screenshot ? this.assetUrl(item.screenshot) : null;
-      const html = `${fm}<h1>${esc(item.title)}</h1>${renderMarkdown(item.body, { image: (src) => this.assetUrl(src) })}`;
+      const html = `${fm}<h1>${esc(item.title)}</h1>${renderMarkdown(item.body, { image: (src) => this.assetUrl(src), link: (href) => this.assetUrl(href) })}`;
       md.innerHTML = html;
+      // The recording plays here, above the link to it.
+      const recUrl = item.recording ? this.assetUrl(item.recording) : null;
+      if (recUrl) {
+        const wrap = document.createElement("div");
+        wrap.className = "player";
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.playsInline = true;
+        video.src = recUrl;
+        knowDuration(video);
+        wrap.appendChild(video);
+        const link = [...md.querySelectorAll("a")].find((a) => a.getAttribute("href") === recUrl);
+        if (link) (link.closest("p") ?? link).before(wrap);
+        else md.querySelector("h1")!.after(wrap);
+      }
       // The screenshot, with the selected element outlined on it.
       const rect = Array.isArray(item.frontMatter.elementRect) ? (item.frontMatter.elementRect as number[]) : null;
       for (const img of md.querySelectorAll("img")) {
@@ -1440,6 +1747,12 @@ export class Toolbar {
       },
       get items() {
         return self.items.slice();
+      },
+      record: () => void self.startRecording(),
+      pauseRecording: () => self.togglePause(),
+      stopRecording: () => self.recorder.stop(),
+      get recordingState() {
+        return self.recorder.state;
       },
       newItem: (type: ItemType = "task") => self.openForm(["task", "bug", "idea"].includes(type) ? type : "task"),
       board: () => self.openBoard(),
