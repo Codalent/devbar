@@ -109,6 +109,11 @@ export interface MarkdownOptions {
   recording?: string | null;
   /** The `created` and `updated` timestamp. */
   now: string;
+  /**
+   * Put before the screenshot and recording links in the body. Defaults to `../`, for a file in a
+   * status folder; `""` for a file that sits next to the `assets/` folder.
+   */
+  linkPrefix?: string;
 }
 
 /** The item's file: front matter, then the description and a section per attached context. */
@@ -151,15 +156,16 @@ export function buildMarkdown(input: CreateInput, o: MarkdownOptions): string {
 
   const yaml = fm.map(([k, v]) => `${k}: ${k === "id" || k === "created" || k === "updated" ? v : yamlScalar(v)}`);
   const parts: string[] = [];
+  const up = o.linkPrefix ?? "../";
   const description = String(input.description ?? "").replace(/\r\n/g, "\n").trim();
   if (description) parts.push(description);
   if (o.recording) {
     const length = Number.isFinite(duration) && duration > 0 ? `, ${formatDuration(duration)}` : "";
-    parts.push(`[Screen recording${length}](../${o.recording})`);
+    parts.push(`[Screen recording${length}](${up}${o.recording})`);
   }
   // Items sit one folder below the data folder, so the image link climbs one level: it then
   // shows on GitHub and in an editor's preview from whichever status folder the file is in.
-  if (o.screenshot) parts.push(`![Screenshot](../${o.screenshot})`);
+  if (o.screenshot) parts.push(`![Screenshot](${up}${o.screenshot})`);
   if (el && el.selector) {
     const html = oneLine(el.html || `<${el.tag ?? "element"}>`, 300);
     const text = el.text ? ` — text ${inlineCode(oneLine(el.text, 120))}` : "";

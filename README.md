@@ -23,6 +23,7 @@ The only difference in setup is **one setting, `server`**. Leave it out and devb
 and devbar talks to that backend.
 
 - [Quick start: no backend](#quick-start-no-backend)
+- [Chrome extension](#chrome-extension): devbar on any site, nothing to install in the app
 - [Connect a backend](#connect-a-backend): [the local server](#1-the-local-server), [inside your Node server](#2-inside-your-own-node-server), [any other language](#3-your-own-backend-in-any-language)
 - [Using it](#using-it) · [The files](#the-files) · [Working with AI coding agents](#working-with-ai-coding-agents) · [Configuration](#configuration)
 - [The REST API](#the-rest-api) (for writing your own backend)
@@ -90,6 +91,48 @@ The React component and `mount()` show the toolbar only in development builds
 (`process.env.NODE_ENV === "development"`), so a production build renders nothing and loads nothing.
 To decide yourself, pass `enabled`: `<DevBar enabled={…} />` or `mount({ enabled: … })`. The script
 tag always shows; add `data-enabled="false"` to turn it off, or leave the tag out of production pages.
+
+## Chrome extension
+
+The extension puts devbar on **any page**, including sites you don't own, with nothing added to the
+app. Click the devbar icon in Chrome's toolbar (or press `Alt/⌥ + Shift + D`) and the dot appears with
+its pills unfolded: **New task** and **Record**. Write the bug, task or idea, press **Save**, and the
+browser downloads it, ready to hand to any AI (Claude, ChatGPT, Cursor, a coding agent).
+
+- **No backend and no board.** Every item is downloaded.
+- **The download** is a single `.md` file, or, with a screenshot or recording, a zip with the
+  Markdown next to an `assets/` folder, so the links work wherever you unzip it:
+
+  ```
+  bug-pay-button-throws-on-click.zip
+    bug-pay-button-throws-on-click.md
+    assets/bug-pay-button-throws-on-click-screenshot.png
+    assets/bug-pay-button-throws-on-click-recording.webm   (when you recorded one)
+  ```
+
+- **Screenshots** are Chrome's own capture of the tab (images from other sites, video and canvas
+  included), not a redrawing of the page.
+- **Console errors** are kept from the moment you first click the icon on a page, not from page load.
+- **Click the icon again** to fold the pills, and once more to take devbar off the page. A form or
+  recording in progress stays.
+- It works on strict sites: the toolbar runs in the extension's own sandbox, so the page's Content
+  Security Policy and scripts don't reach it. It can't run on `chrome://` pages or the Chrome Web
+  Store; the icon shows a red `!` there.
+- **Permissions:** only `activeTab` and `scripting`. devbar can read a page only after you click its
+  icon on that page, and nothing is sent anywhere.
+
+### Install it
+
+```sh
+pnpm install
+pnpm build
+```
+
+Then in Chrome: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and
+pick the `dist/extension` folder. Pin the devbar icon from the puzzle-piece menu. To use it on local
+`file://` pages, open the extension's **Details** and turn on **Allow access to file URLs**.
+
+`pnpm package:extension` builds `dist/devbar-extension.zip` for the Chrome Web Store.
 
 ## Connect a backend
 
