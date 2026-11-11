@@ -7,6 +7,7 @@ export {
   forwardConsole,
   installConsoleBuffer,
   muteConsole,
+  onConsoleEntry,
   type ConsoleEntry,
 } from "./console.js";
 
@@ -160,7 +161,8 @@ function pageBackground(): string {
 }
 
 /** The visible part of the page as a PNG data URL, long side at most 1600 px. */
-export async function captureScreenshot(exclude: Element): Promise<{ dataUrl: string; width: number; height: number }> {
+export async function captureScreenshot(exclude: Element | Element[]): Promise<{ dataUrl: string; width: number; height: number }> {
+  const skip = new Set(Array.isArray(exclude) ? exclude : [exclude]);
   const w = window.innerWidth;
   const h = window.innerHeight;
   const ratio = Math.min(window.devicePixelRatio || 1, MAX_SIDE / Math.max(w, h));
@@ -173,7 +175,7 @@ export async function captureScreenshot(exclude: Element): Promise<{ dataUrl: st
     skipAutoScale: true,
     backgroundColor: pageBackground(),
     imagePlaceholder: BLANK,
-    filter: (node) => node !== exclude,
+    filter: (node) => !skip.has(node as Element),
     // The document's own scroll: shift the page up and left, leaving fixed elements in place.
     style: { margin: "0", marginTop: `${-sy}px`, marginLeft: `${-sx}px`, height: `${h + sy}px`, width: `${w + sx}px` },
   });

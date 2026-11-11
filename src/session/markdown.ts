@@ -4,13 +4,19 @@
  * coding agents alike.
  */
 import { inlineCode, oneLine, yamlScalar } from "../item.js";
-import type { Session, SessionComment } from "./shared.js";
+import type { Session, SessionComment } from "./model.js";
 
 export interface SessionMarkdownOptions {
+  /** The backend's three-digit id, first in the front matter; a download has none. */
+  id?: string | null;
   title: string;
   notes: string;
   finished: string;
-  /** Screenshot path per comment id, relative to the Markdown file, e.g. `assets/x-01.png`. */
+  /** Start the body with `# <title>`. Off for the board, which shows the title itself. Default on. */
+  heading?: boolean;
+  /** A screenshot for the board's card, relative to the data folder (`assets/007-comment-01.png`). */
+  cover?: string | null;
+  /** Screenshot link per comment id, relative to the Markdown file: `assets/x-01.png`, or `../assets/007-comment-01.png` in a status folder. */
   screenshots: Map<string, string>;
 }
 
@@ -52,6 +58,7 @@ export function buildSessionMarkdown(session: Session, o: SessionMarkdownOptions
   const viewports = [...new Set(comments.map((c) => c.viewport).filter(Boolean))];
 
   const fm: Array<[string, unknown]> = [
+    ...(o.id ? [["id", o.id] as [string, unknown]] : []),
     ["title", oneLine(o.title, 200)],
     ["type", "feedback-session"],
     ["started", session.started],
@@ -61,10 +68,12 @@ export function buildSessionMarkdown(session: Session, o: SessionMarkdownOptions
     ["comments", comments.length],
   ];
   if (session.browser) fm.push(["browser", session.browser]);
+  if (o.cover) fm.push(["screenshot", o.cover]);
   if (viewports.length) fm.push(["viewport", viewports.join(", ")]);
-  const yaml = fm.map(([k, v]) => `${k}: ${k === "started" || k === "finished" ? v : yamlScalar(v)}`);
+  const yaml = fm.map(([k, v]) => `${k}: ${k === "id" || k === "started" || k === "finished" ? v : yamlScalar(v)}`);
 
-  const out: string[] = [`---\n${yaml.join("\n")}\n---`, `# ${oneLine(o.title, 200)}`];
+  const out: string[] = [`---\n${yaml.join("\n")}\n---`];
+  if (o.heading !== false) out.push(`# ${oneLine(o.title, 200)}`);
   const notes = o.notes.replace(/\r\n/g, "\n").trim();
   if (notes) out.push(notes);
   out.push(

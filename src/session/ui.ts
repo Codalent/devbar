@@ -1,4 +1,3 @@
-/// <reference types="chrome" />
 /**
  * A feedback session on the page: a bar at the top, numbered pins where comments were left, a
  * popover to write or read one, and a dialog that downloads the whole session as one Markdown file.
@@ -9,22 +8,25 @@
  * show on the page (path and query) they were left on, and the session follows client-side route
  * changes as well as page loads.
  *
- * Everything is stored by the service worker (session-store.ts); this class sends it messages and
- * re-renders when the stored session changes, so all tabs show the same session.
+ * Every change goes through a SessionStore (the widget's localStorage, or the extension's service
+ * worker); this class re-renders when the stored session changes, so all tabs show the same session.
+ * What Finish does (download, or save to a backend) is the host's.
  */
 import { describeElement, selectorFor } from "../client/context.js";
 import { esc } from "../client/markdown.js";
-import { zip, dataUrlBytes } from "../client/zip.js";
 import { localTimestamp } from "../item.js";
-import { buildSessionMarkdown, commentShotName, sessionFileBase } from "./session-markdown.js";
-import { pageUrl, shotKey, type Session, type SessionComment, type SessionConsoleEntry, type SessionMessage } from "./shared.js";
+import { pageUrl, type Session, type SessionComment, type SessionConsoleEntry, type SessionStore } from "./model.js";
 
 export interface SessionHost {
-  /** The visible tab as a PNG data URL with devbar hidden, or null when Chrome refuses. */
-  capture(): Promise<string | null>;
+  /** The visible page as a PNG data URL without devbar's layers (`hide`), or null when it can't be taken. */
+  capture(hide: HTMLElement[]): Promise<string | null>;
   /** The toolbar's element, which pins and picking must ignore. */
   toolbarHost(): HTMLElement | null;
   toast(text: string, code?: string, bad?: boolean): void;
+  /** What Finish does, for the dialog: the button ("Download", "Save") and where it goes. */
+  finishInfo(session: Session): { action: string; target: string; note: string };
+  /** Finish: download the session or send it to the backend. Throws when it didn't work. */
+  finish(session: Session, title: string, notes: string): Promise<void>;
   /** The session ended (finished, discarded, or ended in another tab). */
   ended(): void;
 }
@@ -43,10 +45,6 @@ interface Draft {
 
 const PIN = "#ff3b5c";
 const MAX_SIDE = 1600;
-
-export function send(message: SessionMessage): Promise<{ ok: boolean; session?: Session | null; comment?: SessionComment; error?: string }> {
-  return chrome.runtime.sendMessage(message);
-}
 
 const CSS = `
 .root{all:initial;--glass:rgba(10,10,11,.86);--ink:#fafafa;--muted:#8e8e95;--line:rgba(255,255,255,.1);--line2:rgba(255,255,255,.18);--pin:${PIN};
@@ -154,7 +152,11 @@ export class SessionUI {
   private discardTimer: ReturnType<typeof setTimeout> | undefined;
   private deleteTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(session: Session, private readonly app: SessionHost) {
+  constructor(
+    session: Session,
+    private readonly store: SessionStore,
+    private readonly app: SessionHost,
+  ) {
     this.session = session;
     this.host = document.createElement("devbar-session");
     this.host.setAttribute(
@@ -176,7 +178,7 @@ export class SessionUI {
     observer.observe(document.body, { childList: true });
     this.cleanups.push(() => observer.disconnect());
     this.render();
-    void send({ type: "session:visit", page: { url: this.url, title: document.title } });
+    void this.store.apply({ type: "session:visit", page: { url: this.url, title: document.title } });
   }
 
   destroy(): void {
@@ -324,9 +326,9 @@ export class SessionUI {
     this.url = pageUrl();
     this.elements.clear();
     if (this.open && this.open !== "draft") this.closePop();
-    void send({ type: "session:visit", page: { url: this.url, title: document.title } });
+    void this.store.apply({ type: "session:visit", page: { url: this.url, title: document.title } });
     // The title often changes a moment after a client-side route change.
-    setTimeout(() => void send({ type: "session:visit", page: { url: this.url, title: document.title } }), 1200);
+    setTimeout(() => void this.store.apply({ type: "session:visit", page: { url: this.url, title: document.title } }), 1200);
   }
 
   /** Console entries from the page, kept per page in the session. */
@@ -336,7 +338,7 @@ export class SessionUI {
     const url = this.url;
     this.consoleTimer = setTimeout(() => {
       const entries = this.pendingConsole.splice(0);
-      void send({ type: "session:console", url, entries });
+      void this.store.apply({ type: "session:console", url, entries });
     }, 800);
   }
 
@@ -386,7 +388,7 @@ export class SessionUI {
         anchor = { selector: selectorFor(el), fx: round((x - rect.left) / rect.width), fy: round((y - rect.top) / rect.height) };
         element = describeElement(el);
       }
-      const raw = await this.app.capture();
+      const raw = await this.app.capture([this.host, this.app.toolbarHost()].filter((h): h is HTMLElement => !!h));
       const shot = raw ? await markScreenshot(raw, x, y, n, rect).catch(() => null) : null;
       this.draft = { n, url: this.url, x, y, docX: x + scrollX, docY: y + scrollY, element, anchor, shot };
       this.open = "draft";
@@ -412,7 +414,7 @@ export class SessionUI {
     }
     const button = this.$<HTMLButtonElement>("[data-act=pop-save]");
     button.disabled = true;
-    const reply = await send({
+    const reply = await this.store.apply({
       type: "session:comment",
       comment: {
         n: draft.n,
@@ -510,7 +512,7 @@ export class SessionUI {
     if (!id || id === "draft") return;
     const text = this.$<HTMLTextAreaElement>(".pop textarea").value.trim();
     if (!text) return;
-    const reply = await send({ type: "session:edit", id, text });
+    const reply = await this.store.apply({ type: "session:edit", id, text });
     if (!reply.ok) return this.app.toast(`Not saved: ${reply.error}`, undefined, true);
     this.editing = false;
     if (reply.session) this.update(reply.session);
@@ -530,7 +532,7 @@ export class SessionUI {
       }, 3000);
       return;
     }
-    const reply = await send({ type: "session:delete", id });
+    const reply = await this.store.apply({ type: "session:delete", id });
     this.closePop();
     if (reply.session) this.update(reply.session);
   }
@@ -604,14 +606,17 @@ export class SessionUI {
     const s = this.session;
     const total = s.comments.length;
     const pages = new Set(s.comments.map((c) => c.url)).size;
+    const info = this.app.finishInfo(s);
+    this.$(".finish h3").textContent = `${info.action} the session`;
     this.$(".sum").textContent = total
-      ? `${total} comment${total === 1 ? "" : "s"} on ${pages} page${pages === 1 ? "" : "s"}, in one Markdown file${s.comments.some((c) => c.hasScreenshot) ? " with a screenshot per comment (a zip)" : ""}. The session ends once it downloads.`
+      ? `${total} comment${total === 1 ? "" : "s"} on ${pages} page${pages === 1 ? "" : "s"}, ${info.note}`
       : "No comments yet. Press C, or Alt/⌥-click anywhere, to pin one.";
     const title = this.$<HTMLInputElement>(".finish input[name=title]");
     if (!title.value) title.value = `Feedback on ${location.host || "this site"}`;
-    const base = sessionFileBase(s);
-    this.$(".finish .file").textContent = `↓ ${base}${s.comments.some((c) => c.hasScreenshot) ? ".zip" : ".md"}`;
-    this.$<HTMLButtonElement>("[data-act=download]").disabled = !total;
+    this.$(".finish .file").textContent = info.target;
+    const button = this.$<HTMLButtonElement>("[data-act=download]");
+    button.textContent = info.action;
+    button.disabled = !total;
     this.$(".scrim").hidden = false;
     this.$(".finish").hidden = false;
     setTimeout(() => title.focus(), 30);
@@ -625,42 +630,26 @@ export class SessionUI {
   private async download(button: HTMLButtonElement) {
     const s = this.session;
     if (!s.comments.length || button.disabled) return;
+    const label = button.textContent ?? "Download";
     button.disabled = true;
-    button.textContent = "Preparing…";
+    button.textContent = label === "Download" ? "Preparing…" : "Saving…";
     try {
-      const base = sessionFileBase(s);
-      const keys = s.comments.filter((c) => c.hasScreenshot).map((c) => shotKey(c.id));
-      const stored = keys.length ? await chrome.storage.local.get(keys) : {};
-      const screenshots = new Map<string, string>();
-      const files: { name: string; data: Uint8Array }[] = [];
-      for (const c of [...s.comments].sort((a, b) => a.n - b.n)) {
-        const data = stored[shotKey(c.id)];
-        if (typeof data !== "string") continue;
-        const name = commentShotName(base, c.n);
-        screenshots.set(c.id, name);
-        files.push({ name, data: dataUrlBytes(data) });
-      }
       const title = this.$<HTMLInputElement>(".finish input[name=title]").value.trim() || `Feedback on ${location.host}`;
       const notes = this.$<HTMLTextAreaElement>(".finish textarea[name=notes]").value;
-      const markdown = buildSessionMarkdown(s, { title, notes, finished: localTimestamp(), screenshots });
-      const md = new TextEncoder().encode(markdown);
-      const name = files.length ? `${base}.zip` : `${base}.md`;
-      const blob = files.length ? zip([{ name: `${base}.md`, data: md }, ...files]) : new Blob([md], { type: "text/markdown;charset=utf-8" });
-      saveBlob(this.root, name, blob);
-      await send({ type: "session:end" });
-      this.app.toast("Downloaded the session", name);
+      await this.app.finish(s, title, notes);
+      await this.store.apply({ type: "session:end" });
       this.app.ended();
     } catch (error) {
       button.disabled = false;
-      button.textContent = "Download";
-      this.app.toast(`Not downloaded: ${(error as Error).message}`, undefined, true);
+      button.textContent = label;
+      this.app.toast(`Not ${label === "Download" ? "downloaded" : "saved"}: ${(error as Error).message}`, undefined, true);
     }
   }
 
   private async discard(button: HTMLElement) {
     if (!this.session.comments.length || button.classList.contains("armed")) {
-      await send({ type: "session:end" });
-      this.app.toast(this.session.comments.length ? "Session discarded. Nothing was downloaded." : "Session ended.");
+      await this.store.apply({ type: "session:end" });
+      this.app.toast(this.session.comments.length ? "Session discarded. Nothing was saved." : "Session ended.");
       this.app.ended();
       return;
     }
@@ -679,18 +668,6 @@ export class SessionUI {
 }
 
 const round = (n: number) => Math.round(n * 10000) / 10000;
-
-function saveBlob(parent: Node, name: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.style.display = "none";
-  parent.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
 
 /** The tab's capture with the pin's number at its spot and the element under it outlined. */
 async function markScreenshot(dataUrl: string, x: number, y: number, n: number, rect: DOMRect | null): Promise<string> {

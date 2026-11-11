@@ -3,12 +3,14 @@
 A small dev toolbar for any web app. A dot sits in the corner of your app; click it to log a
 **task, bug or idea** while you are looking at the problem, with a screenshot, the page, the
 browser, recent console errors and the element you point at, or a **recording of your screen and voice** while you walk through what to fix.
+Or start a **feedback session**: click through your app pinning comments on any element, across
+pages, and save them all as one file.
 Each item becomes a **Markdown file** that you, your team and your AI coding agent can pick up.
 
 ![devbar in action: log a bug with a screenshot, the console error and the picked element, then drag it across the board](docs/demo.gif)
 
-<sub>Logging a bug on the demo page, picking the broken button, saving it as `.devbar/open/009-….md`, then
-moving it to Ready on the board. [Watch as MP4](docs/demo.mp4).</sub>
+<sub>A feedback session on the demo app: pinning comments on two pages, saving them as one item, then
+opening it on the board. [Watch as MP4](docs/demo.mp4).</sub>
 
 ## Two ways to use it
 
@@ -25,7 +27,7 @@ and devbar talks to that backend.
 - [Quick start: no backend](#quick-start-no-backend)
 - [Chrome extension](#chrome-extension): devbar on any site, nothing to install in the app
 - [Connect a backend](#connect-a-backend): [the local server](#1-the-local-server), [inside your Node server](#2-inside-your-own-node-server), [any other language](#3-your-own-backend-in-any-language)
-- [Using it](#using-it) · [The files](#the-files) · [Working with AI coding agents](#working-with-ai-coding-agents) · [Configuration](#configuration)
+- [Using it](#using-it) · [Feedback sessions](#feedback-sessions) · [The files](#the-files) · [Working with AI coding agents](#working-with-ai-coding-agents) · [Configuration](#configuration)
 - [The REST API](#the-rest-api) (for writing your own backend)
 - [Security](#security) · [Upgrading from 0.3](#upgrading-from-03)
 
@@ -59,7 +61,7 @@ mount();
 `node_modules/@codalent/devbar/dist/devbar.js` into your static folder and load it from there:
 
 ```html
-<script src="https://unpkg.com/@codalent/devbar@0.4/dist/devbar.js"></script>
+<script src="https://unpkg.com/@codalent/devbar@0.5/dist/devbar.js"></script>
 ```
 
 That's all. Click the dot, fill in the form, press **Save**, and the browser downloads the item.
@@ -123,65 +125,12 @@ browser downloads it, ready to hand to any AI (Claude, ChatGPT, Cursor, a coding
   its icon there (Chrome keeps that access while the tab stays on the same site), and nothing is
   sent anywhere.
 
-### Feedback sessions
+### Feedback sessions in the extension
 
-A feedback session collects many comments, across the pages of a site, into **one Markdown file**.
-Press **Feedback session** (or `S` with the pills open) and a bar appears at the top of the page.
-
-- **Pin a comment:** press `C` (or the bar's **+ Comment**) and click the spot, or `Alt/⌥`-click
-  anywhere (the page doesn't see that click). Write the comment and press **Save** (`Ctrl/⌘ + Enter`).
-- **Pins stay put.** Each pin is numbered and anchored to the element under it, so it follows the
-  element as the page scrolls or reflows. Click a pin to read, edit or delete its comment.
-- **Navigate freely.** The session follows client-side route changes and full page loads; each page
-  shows only its own pins. Leaving the site and coming back to it, or opening another tab, needs
-  one click on the icon there to pick the session up again. The icon's badge counts the comments.
-- **Every comment gets a screenshot**, taken when you drop the pin, with the pin's number drawn on
-  it and the element outlined. Console errors are kept per page.
-- **Finish** asks for a title and optional notes, then downloads the session and ends it. The
-  session survives closing the tab or the browser until you finish or discard it (`×`, twice).
-
-The download is a zip with one Markdown file and a screenshot per comment:
-
-```
-feedback-shop-example-com-2026-11-11-1532.zip
-  feedback-shop-example-com-2026-11-11-1532.md
-  assets/feedback-shop-example-com-2026-11-11-1532-01.png
-  assets/feedback-shop-example-com-2026-11-11-1532-02.png
-```
-
-The Markdown lists the pages, then each page's comments in order, with the element (its HTML and a
-unique CSS selector), the screenshot, and the console errors seen there:
-
-```markdown
----
-title: Feedback on shop.example.com
-type: feedback-session
-started: 2026-11-11T15:32:32+09:00
-finished: 2026-11-11T15:41:03+09:00
-origin: https://shop.example.com
-pages: 2
-comments: 3
-browser: Chrome 151 on macOS 27
-viewport: 1280x800
----
-
-# Feedback on shop.example.com
-
-Focus on the signup flow first.
-
-## `/pricing` — Pricing
-https://shop.example.com/pricing
-
-### 3. Show yearly pricing too
-
-- **Element:** `<h2>Pro</h2>` — selector `#pro > h2` — text `Pro`
-- **Pinned at:** 61, 203 px in the page, window 1280x800
-
-![Comment 3](assets/feedback-shop-example-com-2026-11-11-1532-03.png)
-
-### Console errors on this page
-- Error: Checkout failed: 402 (app.js:3)
-```
+[Feedback sessions](#feedback-sessions) work in the extension as in the widget, and download when
+you finish. Two differences: the icon's badge counts the session's comments, and the session picks
+itself up after each page load on the same site. On another site, or in another tab, click the icon
+there once to carry on.
 
 ### Install it
 
@@ -301,8 +250,8 @@ endpoints: `GET /api/health`, `GET /api/items` (it can return an empty list) and
 
 - **The dot** sits bottom-right. Drag it anywhere; it snaps to the nearest edge (keeping its place
   along it) or, near a corner, to the corner, and remembers where you put it.
-- **Click the dot** and pills unfold: **New task**, **Board** and **Record** with a backend; **New
-  task** and **Record** without one.
+- **Click the dot** and pills unfold: **New task**, **Board**, **Feedback session** and **Record**
+  with a backend; the same without **Board** without one.
 - **With a backend**, the badge counts items in **Open** and **In progress**. A grey dot means the
   backend can't be reached: hover it for the hint. It reconnects by itself when the backend comes
   back and you return to the tab.
@@ -335,11 +284,86 @@ endpoints: `GET /api/health`, `GET /api/items` (it can return an empty list) and
   edit the Markdown, move it or delete it (delete asks twice). With the Node backend, edits you make
   in your editor show up on the board at once.
 
-Keyboard: `Esc` closes whatever is open. With the dot open, `N` opens a new item, `B` the board and
-`R` starts a recording. `Ctrl/⌘ + Shift + .` opens and closes the board from anywhere (the form,
+Keyboard: `Esc` closes whatever is open. With the dot open, `N` opens a new item, `B` the board,
+`S` starts a feedback session and `R` starts a recording. In a feedback session, `C` pins a comment. `Ctrl/⌘ + Shift + .` opens and closes the board from anywhere (the form,
 without a backend), and `Ctrl/⌘ + Enter` saves the form. While recording, from anywhere in the page:
 `Alt/⌥ + Shift + P` pauses and resumes, `Alt/⌥ + Shift + S` stops; `Alt/⌥ + Shift + R` starts a
 recording.
+
+## Feedback sessions
+
+A feedback session collects many comments, across the pages of your app, into **one Markdown
+file**. Use it for a review pass: click through the app and say what should change, where it is.
+Press **Feedback session** (or `S` with the pills open) and a bar appears at the top of the page.
+
+- **Pin a comment:** press `C` (or the bar's **+ Comment**) and click the spot, or `Alt/⌥`-click
+  anywhere (the page doesn't see that click). Write the comment and press **Save** (`Ctrl/⌘ + Enter`).
+- **Pins stay put.** Each pin is numbered and anchored to the element under it, so it follows the
+  element as the page scrolls or reflows. Click a pin to read, edit or delete its comment.
+- **Navigate freely.** The session follows client-side route changes and full page loads, and each
+  page shows only its own pins. It is kept in the browser (localStorage, and IndexedDB for the
+  screenshots) for your app's origin, so it carries on in every page that loads devbar, in any tab,
+  and after closing the browser, until you finish or discard it (`×`, twice).
+- **Every comment gets a screenshot**, taken when you drop the pin, with the pin's number drawn on it
+  and the element outlined. Console errors are kept per page.
+- **Finish** asks for a title and optional notes, then saves the session and ends it:
+  - **With a backend**, it becomes one item, `.devbar/open/NNN-<title>.md`, with a screenshot per
+    comment in `assets/NNN-comment-01.png`, … The board shows it as a **session** card. A backend
+    without [`POST /api/sessions`](#post-apisessions-optional) gets a download instead.
+  - **Without a backend**, it downloads a zip with the Markdown and its screenshots:
+
+    ```
+    feedback-shop-example-com-2026-11-11-1532.zip
+      feedback-shop-example-com-2026-11-11-1532.md
+      assets/feedback-shop-example-com-2026-11-11-1532-01.png
+      assets/feedback-shop-example-com-2026-11-11-1532-02.png
+    ```
+
+The Markdown lists the pages, then each page's comments in order, with the element (its HTML and a
+unique CSS selector), the screenshot, and the console errors seen there:
+
+```markdown
+---
+id: 012
+title: Feedback on shop.example.com
+type: feedback-session
+started: 2026-11-11T15:32:32+09:00
+finished: 2026-11-11T15:41:03+09:00
+origin: https://shop.example.com
+pages: 2
+comments: 3
+browser: Chrome 151 on macOS 27
+screenshot: assets/012-comment-01.png
+viewport: 1280x800
+---
+
+Focus on the signup flow first.
+
+3 comments on 2 pages. Each comment is pinned to a spot on its page; its screenshot shows the pin's
+number there and outlines the element under it.
+
+## Pages
+1. `/signup` — Sign up (2 comments)
+2. `/pricing` — Pricing (1 comment)
+
+…
+
+## `/pricing` — Pricing
+https://shop.example.com/pricing
+
+### 3. Show yearly pricing too
+
+- **Element:** `<h2>Pro</h2>` — selector `#pro > h2` — text `Pro`
+- **Pinned at:** 61, 203 px in the page, window 1280x800
+
+![Comment 3](../assets/012-comment-03.png)
+
+### Console errors on this page
+- Error: Checkout failed: 402 (app.js:3)
+```
+
+A downloaded session has no `id`, starts with `# <title>`, and links its screenshots as
+`assets/…` (next to the file) rather than `../assets/…`.
 
 ## The files
 
@@ -483,6 +507,7 @@ works without them and only loses the feature they provide.
 | `GET /api/items` | **yes** | the board's list and the dot's badge |
 | `POST /api/items` | **yes** | Save |
 | `PUT /api/items/:key/recording` | no | the video of an item saved with a screen recording |
+| `POST /api/sessions` | no | Finish in a feedback session; without it, the widget downloads the session |
 | `GET /api/items/:key` | **yes**, for the board | opening a card |
 | `PUT /api/items/:key` | no | editing a card's Markdown |
 | `POST /api/items/:key/move` | no | dragging a card to another column |
@@ -617,6 +642,38 @@ megabytes, so stream it rather than reading it into memory; the Node backend acc
 Store it, set the item's `recording` (for example `assets/001-recording.webm`), and answer
 `{ "item": { … } }`. If this fails, the widget deletes the item it just created (`DELETE`) and keeps
 the video in the form so you can try again.
+
+#### `POST /api/sessions` (optional)
+
+Finish in a [feedback session](#feedback-sessions). The widget sends the whole session at once:
+
+```json
+{
+  "title": "Feedback on shop.example.com",
+  "notes": "Focus on the signup flow first.",
+  "finished": "2026-11-11T15:41:03+09:00",
+  "session": {
+    "started": "2026-11-11T15:32:32+09:00",
+    "browser": "Chrome 151 on macOS 27",
+    "pages": [{ "url": "https://shop.example.com/pricing", "title": "Pricing", "console": [{ "level": "error", "message": "Checkout failed: 402", "source": "app.js:3" }] }],
+    "comments": [{
+      "id": "c4f1…", "n": 3, "url": "https://shop.example.com/pricing", "pageTitle": "Pricing",
+      "text": "Show yearly pricing too", "created": "2026-11-11T15:38:10+09:00",
+      "element": { "tag": "h2", "selector": "#pro > h2", "html": "<h2>Pro</h2>", "text": "Pro" },
+      "point": { "x": 61, "y": 203 }, "viewport": "1280x800", "hasScreenshot": true
+    }]
+  },
+  "screenshots": { "c4f1…": "data:image/png;base64,iVBORw0KGgo…" }
+}
+```
+
+- `comments[].n` is the number on the pin and on its screenshot; numbers can skip (deleted comments).
+- `screenshots` maps a comment's `id` to its PNG. The body can be tens of megabytes; the Node backend
+  accepts up to 200 MB here.
+- Store it however you like. The Node backend writes one item, as in
+  [Feedback sessions](#feedback-sessions), and answers `201` with `{ "item": { … } }` like
+  `POST /api/items`. The widget shows `path` in its "Saved" message.
+- Answer `404` if you don't take sessions: the widget then downloads the session instead.
 
 #### `PUT /api/items/:key`
 

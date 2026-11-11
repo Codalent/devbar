@@ -6,6 +6,8 @@ import matter from "gray-matter";
 import { PRIORITIES, STATUSES, TYPES, type ItemType, type Priority, type Status } from "../name.js";
 import type { Config } from "./config.js";
 import { buildMarkdown, localTimestamp, oneLine, slugify, yamlScalar, type CreateInput } from "../item.js";
+import { buildSessionMarkdown } from "../session/markdown.js";
+import type { Session, SessionComment } from "../session/model.js";
 
 export { formatDuration, localTimestamp, slugify, yamlScalar, type CreateInput } from "../item.js";
 
@@ -58,6 +60,49 @@ const MD = /\.md$/i;
 const ID_PREFIX = /^(\d+)(?:-|\.md$)/;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
+const MAX_SESSION_COMMENTS = 500;
+
+/** What `POST /api/sessions` takes: a feedback session from the widget, and its screenshots. */
+export interface SessionInput {
+  title?: string;
+  notes?: string;
+  finished?: string;
+  session?: Partial<Session>;
+  /** PNG data URLs by comment id. */
+  screenshots?: Record<string, string>;
+}
+
+/** The session as sent, with every field the Markdown uses checked and given a type. */
+function cleanSession(raw: Partial<Session> | undefined): Session {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.comments)) {
+    throw new StoreError(400, "BAD_SESSION", "session.comments must be a list.");
+  }
+  if (raw.comments.length > MAX_SESSION_COMMENTS) throw new StoreError(413, "TOO_MANY_COMMENTS", `A session can have at most ${MAX_SESSION_COMMENTS} comments.`);
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const comments: SessionComment[] = raw.comments.map((c, i) => {
+    const el = c && typeof c.element === "object" && c.element ? c.element : null;
+    return {
+      id: str(c?.id, 100) || String(i),
+      n: Math.max(1, Math.round(num(c?.n)) || i + 1),
+      url: str(c?.url, 2000),
+      pageTitle: str(c?.pageTitle, 300),
+      text: str(c?.text, 20_000),
+      created: str(c?.created, 40),
+      element: el ? { tag: str(el.tag, 40), id: str(el.id, 200) || undefined, classes: [], text: str(el.text, 200) || undefined, selector: str(el.selector, 500), html: str(el.html, 500), rect: { x: 0, y: 0, w: 0, h: 0 } } : null,
+      anchor: null,
+      point: { x: num(c?.point?.x), y: num(c?.point?.y) },
+      viewport: str(c?.viewport, 40),
+      hasScreenshot: !!c?.hasScreenshot,
+    };
+  });
+  const pages = (Array.isArray(raw.pages) ? raw.pages : []).slice(0, 1000).map((p) => ({
+    url: str(p?.url, 2000),
+    title: str(p?.title, 300),
+    console: (Array.isArray(p?.console) ? p.console : []).slice(0, 30).map((e) => ({ level: e?.level === "warn" ? ("warn" as const) : ("error" as const), message: str(e?.message, 2000), source: str(e?.source, 200) || undefined })),
+  }));
+  return { id: str(raw.id, 100), started: str(raw.started, 40) || localTimestamp(), tabs: [], nextN: 0, pages, comments, browser: str(raw.browser, 200) || undefined };
+}
 const MAX_RECORDING_BYTES = 2 * 1024 * 1024 * 1024;
 /** The video types a browser's MediaRecorder writes, and the extension each is stored with. */
 const RECORDING_TYPES: Record<string, "webm" | "mp4"> = { "video/webm": "webm", "video/mp4": "mp4" };
@@ -274,6 +319,58 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
     });
   }
 
+  /**
+   * A feedback session as one item in `open/`: `NNN-<title>.md`, with each comment's screenshot as
+   * `assets/NNN-comment-01.png` (numbered as the comment is). The first screenshot is the card's.
+   */
+  async function createSession(input: SessionInput): Promise<ItemWithBody> {
+    const title = oneLine(input.title, 200);
+    if (!title) throw new StoreError(400, "TITLE_REQUIRED", "A session needs a title.");
+    const session = cleanSession(input.session);
+    if (!session.comments.length) throw new StoreError(400, "NO_COMMENTS", "The session has no comments.");
+    const shots = new Map<string, Buffer>();
+    for (const c of session.comments) {
+      const data = input.screenshots?.[c.id];
+      if (typeof data === "string") shots.set(c.id, decodeScreenshot(data));
+    }
+    return serialize(async () => {
+      await ensureFolders();
+      const id = await nextId();
+      const assets = getConfig().folders.assets;
+      const links = new Map<string, string>();
+      const written: string[] = [];
+      let cover: string | null = null;
+      try {
+        for (const c of [...session.comments].sort((a, b) => a.n - b.n)) {
+          const bytes = shots.get(c.id);
+          if (!bytes) continue;
+          const name = `${id}-comment-${String(c.n).padStart(2, "0")}.png`;
+          if (written.includes(name)) continue;
+          const full = inside(assetsDir(), name);
+          await writeFile(full, bytes, { flag: "wx" });
+          written.push(name);
+          links.set(c.id, `../${assets}/${name}`);
+          cover ??= `${assets}/${name}`;
+        }
+        const file = `${id}-${slugify(title)}.md`;
+        const markdown = buildSessionMarkdown(session, {
+          id,
+          title,
+          notes: typeof input.notes === "string" ? input.notes.slice(0, 20_000) : "",
+          finished: typeof input.finished === "string" && input.finished ? oneLine(input.finished, 40) : localTimestamp(),
+          screenshots: links,
+          cover,
+          heading: false,
+        });
+        await writeFile(inside(folderOf("open"), file), markdown, { flag: "wx" });
+        return parse(markdown, file, "open");
+      } catch (error) {
+        for (const name of written) await unlink(inside(assetsDir(), name)).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
   async function update(key: string, input: UpdateInput): Promise<ItemWithBody> {
     return serialize(async () => {
       const item = await find(key);
@@ -345,6 +442,11 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
       }
       const own = ownRecording(item);
       if (own) await unlink(inside(assetsDir(), own)).catch(() => undefined);
+      // A feedback session's screenshots, which only it uses.
+      if (item.id) {
+        const mine = new RegExp(`^${item.id}-comment-\\d+\\.png$`);
+        for (const name of await filesIn(assetsDir())) if (mine.test(name)) await unlink(inside(assetsDir(), name)).catch(() => undefined);
+      }
       return strip(item);
     });
   }
@@ -410,6 +512,7 @@ export function createStore(dataDir: string, getConfig: () => Config, displayDir
     list: async () => (await readAll()).map(strip),
     get: find,
     create,
+    createSession,
     update,
     move,
     remove,

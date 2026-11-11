@@ -52,6 +52,7 @@ const ASSET_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
 };
 const MAX_BODY = 25 * 1024 * 1024;
+const MAX_SESSION_BODY = 200 * 1024 * 1024;
 
 export async function readVersion(): Promise<string> {
   for (const candidate of [path.join(here, "..", "package.json"), path.join(here, "..", "..", "package.json")]) {
@@ -181,7 +182,7 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
     res.end(JSON.stringify(body));
   }
 
-  async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  async function readJson(req: IncomingMessage, max = MAX_BODY): Promise<Record<string, unknown>> {
     const parsed = (req as IncomingMessage & { body?: unknown }).body;
     if (req.readableEnded && parsed && typeof parsed === "object" && !Array.isArray(parsed) && !Buffer.isBuffer(parsed)) {
       return parsed as Record<string, unknown>;
@@ -190,7 +191,7 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > MAX_BODY) throw new StoreError(413, "TOO_LARGE", "The request body is too large.");
+      if (size > max) throw new StoreError(413, "TOO_LARGE", "The request body is too large.");
       chunks.push(chunk as Buffer);
     }
     if (!size) return {};
@@ -250,6 +251,12 @@ export async function createDevbar(options: DevbarOptions): Promise<Devbar> {
       case "POST /api/items": {
         const item = await store.create((await readJson(req)) as never);
         log(`  + ${item.path}`);
+        return send(res, 201, { item });
+      }
+      case "POST /api/sessions": {
+        // A session carries a screenshot per comment: allow more than one item's worth.
+        const item = await store.createSession((await readJson(req, MAX_SESSION_BODY)) as never);
+        log(`  + ${item.path} (feedback session)`);
         return send(res, 201, { item });
       }
       case "GET /api/items/:id":
