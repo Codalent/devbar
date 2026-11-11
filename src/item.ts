@@ -79,7 +79,7 @@ export function yamlScalar(value: unknown): string {
 }
 
 /** Backticks that cannot be closed by the text inside them. */
-function inlineCode(text: string): string {
+export function inlineCode(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((m) => m.length));
   const fence = "`".repeat(longest + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";

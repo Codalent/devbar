@@ -96,7 +96,7 @@ tag always shows; add `data-enabled="false"` to turn it off, or leave the tag ou
 
 The extension puts devbar on **any page**, including sites you don't own, with nothing added to the
 app. Click the devbar icon in Chrome's toolbar (or press `Alt/⌥ + Shift + D`) and the dot appears with
-its pills unfolded: **New task** and **Record**. Write the bug, task or idea, press **Save**, and the
+its pills unfolded: **New task**, **Feedback session** and **Record**. Write the bug, task or idea, press **Save**, and the
 browser downloads it, ready to hand to any AI (Claude, ChatGPT, Cursor, a coding agent).
 
 - **No backend and no board.** Every item is downloaded.
@@ -113,13 +113,75 @@ browser downloads it, ready to hand to any AI (Claude, ChatGPT, Cursor, a coding
 - **Screenshots** are Chrome's own capture of the tab (images from other sites, video and canvas
   included), not a redrawing of the page.
 - **Console errors** are kept from the moment you first click the icon on a page, not from page load.
-- **Click the icon again** to fold the pills, and once more to take devbar off the page. A form or
-  recording in progress stays.
+- **Click the icon again** to fold the pills, and once more to take devbar off the page. A form,
+  recording or feedback session in progress stays.
 - It works on strict sites: the toolbar runs in the extension's own sandbox, so the page's Content
   Security Policy and scripts don't reach it. It can't run on `chrome://` pages or the Chrome Web
   Store; the icon shows a red `!` there.
-- **Permissions:** only `activeTab` and `scripting`. devbar can read a page only after you click its
-  icon on that page, and nothing is sent anywhere.
+- **Permissions:** `activeTab` and `scripting`, plus `storage` and `unlimitedStorage` to keep a
+  feedback session and its screenshots on your machine. devbar can read a page only after you click
+  its icon there (Chrome keeps that access while the tab stays on the same site), and nothing is
+  sent anywhere.
+
+### Feedback sessions
+
+A feedback session collects many comments, across the pages of a site, into **one Markdown file**.
+Press **Feedback session** (or `S` with the pills open) and a bar appears at the top of the page.
+
+- **Pin a comment:** press `C` (or the bar's **+ Comment**) and click the spot, or `Alt/⌥`-click
+  anywhere (the page doesn't see that click). Write the comment and press **Save** (`Ctrl/⌘ + Enter`).
+- **Pins stay put.** Each pin is numbered and anchored to the element under it, so it follows the
+  element as the page scrolls or reflows. Click a pin to read, edit or delete its comment.
+- **Navigate freely.** The session follows client-side route changes and full page loads; each page
+  shows only its own pins. Leaving the site and coming back to it, or opening another tab, needs
+  one click on the icon there to pick the session up again. The icon's badge counts the comments.
+- **Every comment gets a screenshot**, taken when you drop the pin, with the pin's number drawn on
+  it and the element outlined. Console errors are kept per page.
+- **Finish** asks for a title and optional notes, then downloads the session and ends it. The
+  session survives closing the tab or the browser until you finish or discard it (`×`, twice).
+
+The download is a zip with one Markdown file and a screenshot per comment:
+
+```
+feedback-shop-example-com-2026-11-11-1532.zip
+  feedback-shop-example-com-2026-11-11-1532.md
+  assets/feedback-shop-example-com-2026-11-11-1532-01.png
+  assets/feedback-shop-example-com-2026-11-11-1532-02.png
+```
+
+The Markdown lists the pages, then each page's comments in order, with the element (its HTML and a
+unique CSS selector), the screenshot, and the console errors seen there:
+
+```markdown
+---
+title: Feedback on shop.example.com
+type: feedback-session
+started: 2026-11-11T15:32:32+09:00
+finished: 2026-11-11T15:41:03+09:00
+origin: https://shop.example.com
+pages: 2
+comments: 3
+browser: Chrome 151 on macOS 27
+viewport: 1280x800
+---
+
+# Feedback on shop.example.com
+
+Focus on the signup flow first.
+
+## `/pricing` — Pricing
+https://shop.example.com/pricing
+
+### 3. Show yearly pricing too
+
+- **Element:** `<h2>Pro</h2>` — selector `#pro > h2` — text `Pro`
+- **Pinned at:** 61, 203 px in the page, window 1280x800
+
+![Comment 3](assets/feedback-shop-example-com-2026-11-11-1532-03.png)
+
+### Console errors on this page
+- Error: Checkout failed: 402 (app.js:3)
+```
 
 ### Install it
 

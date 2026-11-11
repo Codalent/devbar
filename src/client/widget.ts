@@ -291,6 +291,20 @@ export interface ToolbarOptions {
   layout?: "devbar" | "flat";
   /** How the form says since when console errors are kept. Defaults to "since page load". */
   consoleSince?: string;
+  /** More pills, shown before Record. */
+  actions?: ToolbarAction[];
+}
+
+/** A pill the host adds to the dot's menu. */
+export interface ToolbarAction {
+  /** Unique among actions, e.g. "session". */
+  id: string;
+  label: string;
+  /** An inline SVG, drawn like the other pills' icons. */
+  icon: string;
+  /** One letter that runs it while the menu is open. */
+  key?: string;
+  run(): void;
 }
 
 export class Toolbar {
@@ -362,6 +376,10 @@ export class Toolbar {
     this.host.setAttribute("data-version", VERSION);
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${CSS}</style>${TEMPLATE}`;
+    for (const action of options.actions ?? []) {
+      const kbd = action.key ? `<kbd>${esc(action.key.toUpperCase())}</kbd>` : "";
+      this.$("[data-act=record]").insertAdjacentHTML("beforebegin", `<button class="pill glass" data-act="x:${esc(action.id)}">${action.icon}${esc(action.label)}${kbd}</button>`);
+    }
     if (this.server) {
       this.$(".tip").innerHTML = `Not connected to <code>${esc(this.server)}</code>. Start the backend (the local one: <code>npx ${PACKAGE}</code>); it reconnects by itself.`;
     }
@@ -837,6 +855,8 @@ export class Toolbar {
           return this.drawer && this.renderDrawer(this.drawer);
         case "delete":
           return void this.deleteItem(target);
+        default:
+          return this.runAction(target.dataset.act?.slice(2));
       }
     });
 
@@ -993,8 +1013,18 @@ export class Toolbar {
       } else if (k === "r") {
         e.preventDefault();
         void this.startRecording();
+      } else if (this.options.actions?.some((a) => a.key?.toLowerCase() === k)) {
+        e.preventDefault();
+        this.runAction(this.options.actions.find((a) => a.key?.toLowerCase() === k)!.id);
       }
     }
+  }
+
+  private runAction(id: string | undefined) {
+    const action = this.options.actions?.find((a) => a.id === id);
+    if (!action) return;
+    this.setOpen(false);
+    action.run();
   }
 
   /** `mod+shift+.` by default; `mod` is Ctrl or ⌘. */
@@ -1784,6 +1814,7 @@ export class Toolbar {
       get formOpen() {
         return self.formOpen;
       },
+      toast: (text: string, code?: string, bad = false) => self.toast(text, code, bad),
       close: () => {
         self.endPick();
         self.closeBoard();
