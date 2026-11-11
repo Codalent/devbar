@@ -67,8 +67,23 @@ function callerSource(skipScript: string | null): string | undefined {
   return undefined;
 }
 
+const listeners = new Set<(entry: ConsoleEntry) => void>();
+
+/** Hear each entry as it is kept (a feedback session keeps them per page). Returns a function that stops. */
+export function onConsoleEntry(fn: (entry: ConsoleEntry) => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
 function push(entry: ConsoleEntry) {
   if (muted) return;
+  for (const fn of listeners) {
+    try {
+      fn(entry);
+    } catch {
+      // a listener's problem is not the page's
+    }
+  }
   if (forward) {
     forward(entry);
     return;

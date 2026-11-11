@@ -1,5 +1,9 @@
 import { GLOBAL_NAME, NAME } from "../name.js";
-import { installConsoleBuffer } from "./context.js";
+import { backendInfo, downloadInfo, downloadSession, SessionsUnsupported, uploadSession } from "../session/finish.js";
+import { localSessionStore } from "../session/local-store.js";
+import { SessionManager } from "../session/manager.js";
+import type { Session } from "../session/model.js";
+import { captureScreenshot, installConsoleBuffer } from "./context.js";
 import { loadFonts } from "./fonts.js";
 import { Toolbar } from "./widget.js";
 
@@ -30,6 +34,7 @@ export function isDevelopment(): boolean {
 }
 
 let current: Toolbar | null = null;
+let sessions: SessionManager | null = null;
 
 /** Starts listening to the console now, so errors from before the toolbar mounts are kept. */
 export function listen(ownScript: string | null = null): void {
@@ -43,13 +48,45 @@ export function mount(options: MountOptions = {}): void {
   const w = window as unknown as Record<string, unknown>;
   if (current || w[GLOBAL_NAME]) return; // loaded twice: keep the first
   installConsoleBuffer(null);
-  const server = options.server?.trim() || null;
+  const server = options.server?.trim().replace(/\/+$/, "") || null;
+  const key = options.key || null;
   const start = () => {
     if (current) return;
-    current = new Toolbar(server, options.key);
+    const store = localSessionStore();
+    const toast = (text: string, code?: string, bad?: boolean) => (current?.handle() as { toast?: (t: string, c?: string, b?: boolean) => void } | undefined)?.toast?.(text, code, bad);
+    const download = async (session: Session, title: string, notes: string) => {
+      const name = await downloadSession(store, session, title, notes, current?.host.shadowRoot ?? document.body);
+      toast("Downloaded the session", name);
+    };
+    const manager = new SessionManager({
+      store,
+      toolbar: () => (current ? { host: current.host, toast } : null),
+      // The page drawn, leaving out devbar's own layers.
+      capture: (hide) => captureScreenshot(hide).then((r) => r.dataUrl, () => null),
+      finishInfo: (session) => (server ? backendInfo(server) : downloadInfo(session)),
+      async finish(session, title, notes) {
+        if (!server) return download(session, title, notes);
+        try {
+          const path = await uploadSession(server, key, store, session, title, notes);
+          toast("Saved the session", path);
+        } catch (error) {
+          // An older backend: keep the work, as a download.
+          if (!(error instanceof SessionsUnsupported)) throw error;
+          await download(session, title, notes);
+        }
+      },
+    });
+    sessions = manager;
+    current = new Toolbar(server, options.key, {
+      actions: [manager.action()],
+      // The form's screenshot leaves out the session's pins too.
+      screenshot: (exclude) => captureScreenshot([exclude, manager.host].filter((h): h is HTMLElement => !!h)),
+    });
     w[GLOBAL_NAME] = current.handle();
     loadFonts(NAME);
     current.mount();
+    // A session from an earlier page of this site carries on here.
+    void manager.resume();
   };
   w[GLOBAL_NAME] = { name: NAME, pending: true };
   if (document.body) start();
@@ -57,6 +94,8 @@ export function mount(options: MountOptions = {}): void {
 }
 
 export function unmount(): void {
+  sessions?.destroy();
+  sessions = null;
   current?.destroy();
   current = null;
   delete (window as unknown as Record<string, unknown>)[GLOBAL_NAME];

@@ -1593,7 +1593,7 @@ export class Toolbar {
         card.tabIndex = 0;
         card.dataset.key = it.key;
         card.style.setProperty("--tc", TYPE_COLOR[it.type]);
-        card.innerHTML = `<div class="top"><span class="type"><i></i>${it.type}</span><span class="id">${it.id ? `#${esc(it.id)}` : esc(it.key)}</span></div><div class="title">${esc(it.title)}</div><div class="meta">${it.recording ? '<span class="vid" title="Has a screen recording"></span>' : ""}${it.screenshot ? '<span class="shot" title="Has a screenshot"></span>' : ""}<span class="pg">${esc(it.page ?? "")}</span><span class="pr ${it.priority}">${it.priority}</span></div>`;
+        card.innerHTML = `<div class="top"><span class="type"><i></i>${it.frontMatter?.type === "feedback-session" ? "session" : it.type}</span><span class="id">${it.id ? `#${esc(it.id)}` : esc(it.key)}</span></div><div class="title">${esc(it.title)}</div><div class="meta">${it.recording ? '<span class="vid" title="Has a screen recording"></span>' : ""}${it.screenshot ? '<span class="shot" title="Has a screenshot"></span>' : ""}<span class="pg">${esc(it.page ?? "")}</span><span class="pr ${it.priority}">${it.priority}</span></div>`;
         card.addEventListener("click", () => void this.openDrawer(it.key));
         card.addEventListener("keydown", (e) => {
           if (e.key === "Enter") void this.openDrawer(it.key);
