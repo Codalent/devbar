@@ -280,6 +280,33 @@ function downloadBlob(parent: Node, name: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** Ways a host other than the script tag (the browser extension) adjusts the toolbar. */
+export interface ToolbarOptions {
+  /** Takes the screenshot instead of drawing the page; `exclude` is the toolbar, to leave out. */
+  screenshot?: (exclude: HTMLElement) => Promise<{ dataUrl: string }>;
+  /**
+   * Download layout without a backend. `"devbar"` (the default) zips `open/<name>.md` and
+   * `assets/…`, ready to unzip into `.devbar/`; `"flat"` zips `<name>.md` next to `assets/…`.
+   */
+  layout?: "devbar" | "flat";
+  /** How the form says since when console errors are kept. Defaults to "since page load". */
+  consoleSince?: string;
+  /** More pills, shown before Record. */
+  actions?: ToolbarAction[];
+}
+
+/** A pill the host adds to the dot's menu. */
+export interface ToolbarAction {
+  /** Unique among actions, e.g. "session". */
+  id: string;
+  label: string;
+  /** An inline SVG, drawn like the other pills' icons. */
+  icon: string;
+  /** One letter that runs it while the menu is open. */
+  key?: string;
+  run(): void;
+}
+
 export class Toolbar {
   readonly host: HTMLElement;
   private readonly root: ShadowRoot;
@@ -287,6 +314,7 @@ export class Toolbar {
   private readonly server: string | null;
   /** Sent with every request: a header where it can be, a `key` parameter where it cannot. */
   private readonly key: string | null;
+  private readonly options: ToolbarOptions;
 
   private connected = false;
   private noticed = false;
@@ -336,15 +364,22 @@ export class Toolbar {
   /** The backend has no event stream (or it keeps failing): refresh when the tab comes back instead. */
   private noEvents = false;
 
-  constructor(server?: string | null, key?: string) {
+  constructor(server?: string | null, key?: string, options: ToolbarOptions = {}) {
     this.server = server ? server.replace(/\/+$/, "") : null;
     this.key = key || null;
-    if (!customElements.get(ELEMENT_NAME)) customElements.define(ELEMENT_NAME, class extends HTMLElement {});
+    this.options = options;
+    // A browser extension's content script has no customElements; the element works undefined too.
+    const registry = window.customElements as CustomElementRegistry | null | undefined;
+    if (registry && !registry.get(ELEMENT_NAME)) registry.define(ELEMENT_NAME, class extends HTMLElement {});
     this.host = document.createElement(ELEMENT_NAME);
     this.host.setAttribute("style", HOST_STYLE);
     this.host.setAttribute("data-version", VERSION);
     this.root = this.host.attachShadow({ mode: "open" });
     this.root.innerHTML = `<style>${CSS}</style>${TEMPLATE}`;
+    for (const action of options.actions ?? []) {
+      const kbd = action.key ? `<kbd>${esc(action.key.toUpperCase())}</kbd>` : "";
+      this.$("[data-act=record]").insertAdjacentHTML("beforebegin", `<button class="pill glass" data-act="x:${esc(action.id)}">${action.icon}${esc(action.label)}${kbd}</button>`);
+    }
     if (this.server) {
       this.$(".tip").innerHTML = `Not connected to <code>${esc(this.server)}</code>. Start the backend (the local one: <code>npx ${PACKAGE}</code>); it reconnects by itself.`;
     }
@@ -820,6 +855,8 @@ export class Toolbar {
           return this.drawer && this.renderDrawer(this.drawer);
         case "delete":
           return void this.deleteItem(target);
+        default:
+          return this.runAction(target.dataset.act?.slice(2));
       }
     });
 
@@ -976,8 +1013,18 @@ export class Toolbar {
       } else if (k === "r") {
         e.preventDefault();
         void this.startRecording();
+      } else if (this.options.actions?.some((a) => a.key?.toLowerCase() === k)) {
+        e.preventDefault();
+        this.runAction(this.options.actions.find((a) => a.key?.toLowerCase() === k)!.id);
       }
     }
+  }
+
+  private runAction(id: string | undefined) {
+    const action = this.options.actions?.find((a) => a.id === id);
+    if (!action) return;
+    this.setOpen(false);
+    action.run();
   }
 
   /** `mod+shift+.` by default; `mod` is Ctrl or ⌘. */
@@ -1087,7 +1134,7 @@ export class Toolbar {
     const run = ++this.shotRun;
     this.shot = { state: "busy" };
     this.renderToggles();
-    const promise = captureScreenshot(this.host)
+    const promise = (this.options.screenshot ?? captureScreenshot)(this.host)
       .then((r) => {
         if (run !== this.shotRun) return;
         this.shot = { state: "done", dataUrl: r.dataUrl };
@@ -1202,7 +1249,8 @@ export class Toolbar {
         d.textContent = this.browser?.summary ?? "…";
       } else if (key === "console") {
         const entries = consoleEntries();
-        d.textContent = entries.length ? `${entries.length} since page load · last: ${entries[entries.length - 1].message}` : "none since page load";
+        const since = this.options.consoleSince ?? "since page load";
+        d.textContent = entries.length ? `${entries.length} ${since} · last: ${entries[entries.length - 1].message}` : `none ${since}`;
       } else if (key === "element") {
         row.querySelector<HTMLElement>(".pick")!.hidden = disabled;
         d.textContent = disabled ? "bugs only" : this.picked ? `${this.picked.html} · ${this.picked.selector}` : "none yet · press Pick";
@@ -1314,8 +1362,10 @@ export class Toolbar {
     const screenshot = shot ? `${assets}/${base}-screenshot.png` : null;
     const ext = video && /mp4/i.test(video.mimeType) ? "mp4" : "webm";
     const recording = video ? `${assets}/${base}-recording.${ext}` : null;
-    const markdown = buildMarkdown(input, { id: null, screenshot, recording, now });
-    const entries: { name: string; data: Uint8Array }[] = [{ name: `${DEFAULT_CONFIG.folders.open}/${base}.md`, data: new TextEncoder().encode(markdown) }];
+    const flat = this.options.layout === "flat";
+    const markdown = buildMarkdown(input, { id: null, screenshot, recording, now, linkPrefix: flat ? "" : "../" });
+    const file = flat ? `${base}.md` : `${DEFAULT_CONFIG.folders.open}/${base}.md`;
+    const entries: { name: string; data: Uint8Array }[] = [{ name: file, data: new TextEncoder().encode(markdown) }];
     if (shot && screenshot) entries.push({ name: screenshot, data: dataUrlBytes(shot) });
     if (video && recording) entries.push({ name: recording, data: new Uint8Array(await video.blob.arrayBuffer()) });
     const archive = zip(entries);
@@ -1756,6 +1806,15 @@ export class Toolbar {
       },
       newItem: (type: ItemType = "task") => self.openForm(["task", "bug", "idea"].includes(type) ? type : "task"),
       board: () => self.openBoard(),
+      /** Unfolds the dot's pills (true), folds them (false), or flips them. */
+      menu: (on?: boolean) => self.setOpen(on ?? !self.open),
+      get menuOpen() {
+        return self.open;
+      },
+      get formOpen() {
+        return self.formOpen;
+      },
+      toast: (text: string, code?: string, bad = false) => self.toast(text, code, bad),
       close: () => {
         self.endPick();
         self.closeBoard();

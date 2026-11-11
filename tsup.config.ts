@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 const { version } = JSON.parse(readFileSync("./package.json", "utf8"));
@@ -55,6 +55,27 @@ export default defineConfig([
     // esbuild fills in process.env.NODE_ENV for browser builds; leave it for the host's bundler,
     // which decides whether the toolbar is on.
     define: { ...define, "process.env.NODE_ENV": "process.env.NODE_ENV" },
+  },
+  // The Chrome extension, unpacked, in dist/extension: load it from chrome://extensions. Not
+  // minified, so the Chrome Web Store's reviewers can read it.
+  {
+    entry: { background: "src/extension/background.ts", devbar: "src/extension/content.ts", console: "src/extension/console.ts" },
+    outDir: "dist/extension",
+    format: ["iife"],
+    platform: "browser",
+    target: "es2022",
+    noExternal: [/.*/],
+    outExtension: () => ({ js: ".js" }),
+    esbuildOptions(o) {
+      o.charset = "ascii";
+    },
+    define: { ...define, "process.env.NODE_ENV": JSON.stringify("development") },
+    async onSuccess() {
+      const manifest = JSON.parse(readFileSync("src/extension/manifest.json", "utf8"));
+      manifest.version = version.replace(/-.*$/, ""); // Chrome takes only numbers and dots
+      writeFileSync("dist/extension/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+      cpSync("src/extension/icons", "dist/extension/icons", { recursive: true });
+    },
   },
   // devbar/react: a tiny component that imports devbar/client when it is on; React stays the host's.
   {

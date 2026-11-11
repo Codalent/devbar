@@ -62,6 +62,7 @@ export const CSS = `
 .pills.show .pill{opacity:1;transform:translate(0,0) scale(1);pointer-events:auto}
 .pills.show .pill:nth-child(2){transition-delay:.05s}
 .pills.show .pill:nth-child(3){transition-delay:.1s}
+.pills.show .pill:nth-child(4){transition-delay:.15s}
 .pills:not(.show) .pill:nth-child(1){transition-delay:.08s}
 .pills:not(.show) .pill:nth-child(2){transition-delay:.04s}
 .pills:not(.show) .pill{transition-duration:.18s,.2s,.2s}
